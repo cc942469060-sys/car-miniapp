@@ -1,0 +1,9 @@
+<import src="../../templates/shared.wxml"/>
+<view class="page"><view wx:if="{{error}}" class="error">{{error}}</view><template wx:if="{{!vehicle && !error}}" is="onboarding"/>
+<block wx:if="{{vehicle}}"><template is="vehicle-switch" data="{{vehicle,vehicles,vehicleIndex}}"/>
+<view class="hero"><view class="hero-label"><text>本月已记支出</text><text>{{month}}</text></view><view class="amount"><text class="currency">¥</text>{{amount}}</view><view class="hero-foot"><text>{{count}} 笔记录 · 每一笔都有迹可循</text><button class="hero-link" bindtap="viewStats">查看统计 ↗</button></view></view>
+<view class="grid"><view class="card" wx:for="{{metrics}}" wx:key="label"><view class="tiny">{{item.label}}</view><view class="metric">{{item.value}}<text class="unit">{{item.unit}}</text></view><view class="tiny">{{item.note}}</view></view></view>
+<button class="primary" bindtap="addRecord" disabled="{{vehicle.archived}}">＋ 记一笔</button><view wx:if="{{vehicle.archived}}" class="notice">此车辆已归档，可在车辆页恢复后继续记录。</view>
+<view class="section"><text class="section-title">接下来，要记得</text><button class="quiet" bindtap="viewCare">全部提醒 →</button></view><view wx:for="{{plans}}" wx:key="id" class="card"><template is="plan-summary" data="{{plan:item}}"/></view><view wx:if="{{!plans.length}}" class="muted">暂无待办，去养护页添加一个计划吧。</view>
+<view class="section"><text class="section-title">最近记录</text><button class="quiet" bindtap="viewLedger">查看账本 →</button></view><template is="records" data="{{records:recent}}"/><view wx:if="{{!recent.length}}" class="muted">还没有记录，点击「记一笔」开始。</view>
+<view class="footer-note">数据保存在本机；清除缓存或更换设备可能导致数据丢失。里程更新：{{mileage.date}} · {{mileage.mileage}} km</view></block></view>

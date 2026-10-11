@@ -1,0 +1,19 @@
+<template name="vehicle-switch">
+  <view class="vehicle-switch" wx:if="{{vehicle}}">
+    <picker range="{{vehicles}}" range-key="name" value="{{vehicleIndex}}" bindchange="switchVehicle"><view class="tiny">我的车库 · {{vehicles.length}} 辆</view><view class="vehicle-name">{{vehicle.name}} ▾</view></picker>
+    <text class="tag">{{vehicle.typeName}}</text>
+  </view>
+</template>
+<template name="onboarding">
+  <view class="empty"><view class="empty-title">每一段里程，都心中有数</view><view class="muted">添加你的第一辆车，开始记录加油、充电与保养。</view><button class="primary" bindtap="addVehicle">＋ 添加车辆</button></view>
+</template>
+<template name="records">
+  <view wx:for="{{records}}" wx:key="id" class="row" data-id="{{item.id}}" bindtap="openRecord" role="button" aria-label="{{item.title}} {{item.date}} {{item.amount}}元，查看详情">
+    <view class="symbol">{{item.symbol}}</view><view class="row-main"><view class="row-title">{{item.title}}<text wx:if="{{item.quantity}}"> · {{item.quantity}} {{item.unit}}</text></view><view class="row-meta">{{item.date}} · {{item.mileage}} km</view><view class="row-meta" wx:if="{{item.note}}">{{item.note}}</view></view><view class="row-price">¥{{item.amount}}</view>
+  </view>
+</template>
+<template name="plan-summary">
+  <view class="plan-title"><text class="row-title">{{plan.name}}</text><text class="badge {{plan.rank === 0 ? 'urgent' : ''}}">{{plan.status}}</text></view>
+  <view class="row-meta" wx:if="{{plan.dueDate}}">到期日期 · {{plan.dueDate}}</view><view class="row-meta" wx:if="{{plan.dueMileage !== null}}">到期里程 · {{plan.dueMileage}} km</view>
+  <view class="tiny" wx:if="{{plan.dueDate && plan.dueMileage !== null}}">日期或里程，任一条件先到即提醒</view><view class="tiny" wx:if="{{plan.stale}}">里程超过 30 天未更新，请核对实际里程</view><view class="tiny" wx:if="{{plan.lastDate}}">最近完成 · {{plan.lastDate}}</view>
+</template>

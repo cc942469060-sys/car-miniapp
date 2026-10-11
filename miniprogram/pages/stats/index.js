@@ -1,0 +1,4 @@
+const U=require('../../utils/ui');
+Page(Object.assign({},U.common,{
+ data:{month:U.D.today().slice(0,7),error:''},onShow(){U.guard(this,()=>{const x=U.base();if(!x.v){this.setData(x.data);return;}const stats=U.D.statistics(x.records,this.data.month),type=U.D.typeOf(x.v);this.setData(Object.assign(x.data,{amount:U.D.money(stats.total),categories:stats.categories.filter(c=>U.D.allowedKinds(x.v).includes(c.kind)).map(c=>Object.assign(c,{amount:U.D.money(c.cents),percent:stats.total?Math.round(c.cents/stats.total*100):0})),energy:[...(type.fuel?[{name:type.charge?'混合用车区间 · 燃油':'完整区间油耗',unit:'L/100km',result:U.D.energyIntervals(x.records,'fuel')}]:[]),...(type.charge?[{name:type.fuel?'混合用车区间 · 电量':'充电侧区间电耗',unit:'kWh/100km',result:U.D.energyIntervals(x.records,'charge')}]:[])]}));});},monthChange(e){this.setData({month:e.detail.value});this.onShow();}
+}));

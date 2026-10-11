@@ -1,0 +1,15 @@
+{
+  "pages": ["pages/home/index", "pages/ledger/index", "pages/care/index", "pages/garage/index", "pages/entry/index", "pages/vehicle/index", "pages/plan/index", "pages/stats/index"],
+  "window": { "navigationBarTitleText": "车小记", "navigationBarBackgroundColor": "#fafaf9", "navigationBarTextStyle": "black", "backgroundColor": "#fafaf9" },
+  "tabBar": {
+    "color": "#78716c", "selectedColor": "#065f46", "backgroundColor": "#ffffff", "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/home/index", "text": "概览" },
+      { "pagePath": "pages/ledger/index", "text": "账本" },
+      { "pagePath": "pages/care/index", "text": "养护" },
+      { "pagePath": "pages/garage/index", "text": "车辆" }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}
