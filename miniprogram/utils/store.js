@@ -24,9 +24,9 @@ function createStore(storage){
       if(old)s.records[s.records.indexOf(old)]=r;else s.records.push(r);
       D.validateTimeline(v,s.records);return r.id;
     });},
-    deleteRecord(id){return change(s=>{D.assert(s.records.some(r=>r.id===id),'记录不存在');s.records=s.records.filter(r=>r.id!==id);});},
+    deleteRecord(id){return change(s=>{const old=s.records.find(r=>r.id===id);D.assert(old,'记录不存在');D.assert(s.vehicles.some(v=>v.id===old.vehicleId&&!v.archived),'车辆不存在或已归档');s.records=s.records.filter(r=>r.id!==id);});},
     savePlan(input){return change(s=>{D.assert(s.vehicles.some(v=>v.id===input.vehicleId&&!v.archived),'车辆不存在或已归档');const old=s.plans.find(p=>p.id===input.id);D.assert(!input.id||old,'计划不存在');D.assert(!old||old.vehicleId===input.vehicleId,'不能移动计划到其他车辆');const p=D.normalizePlan(Object.assign({},input,{id:input.id||uid('p')}),input.vehicleId);if(old)s.plans[s.plans.indexOf(old)]=p;else s.plans.push(p);return p.id;});},
-    deletePlan(id){return change(s=>{s.plans=s.plans.filter(p=>p.id!==id);s.records.forEach(r=>{if(r.planId===id){r.planId='';r.complete=false;}});});}
+    deletePlan(id){return change(s=>{const old=s.plans.find(p=>p.id===id);D.assert(old,'计划不存在');D.assert(s.vehicles.some(v=>v.id===old.vehicleId&&!v.archived),'车辆不存在或已归档');s.plans=s.plans.filter(p=>p.id!==id);s.records.forEach(r=>{if(r.planId===id){r.planId='';r.complete=false;}});});}
   };
 }
 let instance;

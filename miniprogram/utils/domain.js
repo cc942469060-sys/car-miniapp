@@ -5,6 +5,7 @@ const TYPES = [
   { id: 'ev', name: '纯电车', fuel: false, charge: true }
 ];
 const KINDS = { fuel: '加油', charge: '充电', service: '保养', other: '其他费用' };
+const PLAN_KINDS = ['service', 'other'];
 function today() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function assert(ok, message) { if (!ok) throw new Error(message); }
 function validDate(s) { if (!/^\d{4}-\d{2}-\d{2}$/.test(s || '')) return false; const d = new Date(s+'T00:00:00Z'); return Number.isFinite(d.getTime()) && d.toISOString().slice(0,10) === s; }
@@ -13,9 +14,9 @@ function fixed(value, label, positive = false) { assert(/^\d+(\.\d{1,2})?$/.test
 function money(cents) { return (cents/100).toFixed(2); }
 function typeOf(v) { return TYPES.find(t => t.id === v.type); }
 function allowedKinds(v) { const t = typeOf(v); return [ ...(t.fuel ? ['fuel'] : []), ...(t.charge ? ['charge'] : []), 'service', 'other' ]; }
-function currentMileage(v, records) { return records.filter(r=>r.vehicleId===v.id).reduce((a,r)=> r.date > a.date || (r.date === a.date && r.mileage > a.mileage) ? { date:r.date, mileage:r.mileage } : a, {date:v.baseDate,mileage:v.baseMileage}); }
+function currentMileage(v, records) { return records.filter(r=>r.vehicleId===v.id && r.mileage!=null).reduce((a,r)=> r.date > a.date || (r.date === a.date && r.mileage > a.mileage) ? { date:r.date, mileage:r.mileage } : a, {date:v.baseDate,mileage:v.baseMileage}); }
 function validateTimeline(v, records) {
-  const points = [{date:v.baseDate,mileage:v.baseMileage}].concat(records.filter(r=>r.vehicleId===v.id));
+  const points = [{date:v.baseDate,mileage:v.baseMileage}].concat(records.filter(r=>r.vehicleId===v.id && r.mileage!=null));
   points.sort((a,b)=>a.date.localeCompare(b.date)||a.mileage-b.mileage);
   for(let i=1;i<points.length;i++) assert(points[i].mileage >= points[i-1].mileage, '累计里程与相邻日期的记录冲突，请核对日期和里程');
 }
@@ -30,31 +31,32 @@ function normalizeVehicle(input, existing, records) {
 function normalizeRecord(input, v) {
   assert(v && !v.archived, '车辆不存在或已归档'); assert(allowedKinds(v).includes(input.kind), '该车辆不支持此记录类型');
   assert(validDate(input.date) && input.date <= today(), '记录日期无效或晚于今天');
-  const r = { id:input.id, vehicleId:v.id, kind:input.kind, date:input.date, mileage:integer(input.mileage,'累计里程'), cents:fixed(input.amount,'金额'), note:String(input.note||'').trim().slice(0,120), planId:input.planId||'', complete:!!input.complete };
+  // Other expenses (parking, tolls...) may omit mileage unless they complete a plan; such records stay out of the mileage timeline.
+  const planId = input.planId||'', noMileage = input.kind==='other' && !planId && (input.mileage===''||input.mileage==null);
+  const r = { id:input.id, vehicleId:v.id, kind:input.kind, date:input.date, mileage:noMileage ? null : integer(input.mileage,'累计里程'), cents:fixed(input.amount,'金额'), note:String(input.note||'').trim().slice(0,120), planId, complete:!!input.complete };
   if (r.kind === 'fuel' || r.kind === 'charge') { r.quantity100 = fixed(input.quantity,'补能量',true); r.gap = !!input.gap; }
   if (r.kind === 'fuel') r.full = !!input.full;
   if (r.kind === 'charge') {
     r.socAfter = input.socAfter === '' || input.socAfter == null ? null : integer(input.socAfter,'充电后电量',100);
     r.confirmed = !!input.confirmed;
   }
-  assert(!r.complete || r.kind === 'service', '只有保养记录可完成养护计划');
+  assert((!r.planId && !r.complete) || PLAN_KINDS.includes(r.kind), '只有保养或其他费用可完成养护计划');
   return r;
 }
 // Only completed, explicitly valid intervals contribute; never average interval rates directly.
+// An interval closes at the next endpoint in the same state (full tank, or the same SOC after charging).
+// Endpoints in another state stay open as anchors; an endpoint at the anchor's mileage is folded into the next interval.
 function energyIntervals(records, kind) {
   const sorted = records.filter(r=>r.kind===kind).slice().sort((a,b)=>a.date.localeCompare(b.date)||a.mileage-b.mileage||a.id.localeCompare(b.id));
-  let anchor=null, quantity=0, broken=false; const intervals=[];
+  let open=[]; const intervals=[];
   sorted.forEach(r=>{
-    const endpoint = kind==='fuel' ? r.full : r.socAfter != null;
-    if(anchor) {
-      quantity += r.quantity100; broken = broken || r.gap || (kind==='charge' && !r.confirmed);
-      if(endpoint) {
-        const km = r.mileage-anchor.mileage;
-        const comparable = kind==='fuel' || r.socAfter===anchor.socAfter;
-        if(!broken && comparable && km>0) intervals.push({from:anchor.date,to:r.date,km,quantity100:quantity});
-        anchor=r;quantity=0;broken=false;
-      }
-    } else if(endpoint) anchor=r;
+    const broken = r.gap || (kind==='charge' && !r.confirmed);
+    open = broken ? [] : open.map(a=>({record:a.record,quantity:a.quantity+r.quantity100}));
+    if(!(kind==='fuel' ? r.full : r.socAfter != null)) return;
+    const anchor = open.find(a=>kind==='fuel' || a.record.socAfter===r.socAfter);
+    if(anchor && r.mileage<=anchor.record.mileage) return;
+    if(anchor) { intervals.push({from:anchor.record.date,to:r.date,km:r.mileage-anchor.record.mileage,quantity100:anchor.quantity}); open=[]; }
+    open.push({record:r,quantity:0});
   });
   const km=intervals.reduce((s,x)=>s+x.km,0), q=intervals.reduce((s,x)=>s+x.quantity100,0);
   return { intervals, km, rate:km ? (q/km).toFixed(2) : null };
@@ -84,6 +86,9 @@ function reminder(plan, records, mileage, asOf=today()) {
   else if((days!==null&&days<=plan.leadDays)||(km!==null&&km<=plan.leadKm)){status='即将到期';rank=1;}
   const stale=dueMileage!==null&&daysBetween(asOf,mileage.date)>30;
   if(stale && rank===3){status='里程待更新';rank=2;}
-  return Object.assign({},plan,{dueDate,dueMileage,status,rank,days,km,stale,lastDate:last?last.date:''});
+  // Rank date and mileage conditions by the share of their lead still left, so a nearly due mileage plan is not buried.
+  const share=(left,lead)=>left===null?1e9:left/Math.max(lead,1), urgency=Math.min(share(days,plan.leadDays),share(km,plan.leadKm));
+  const daysText=days===null?'':days>0?`还剩 ${days} 天`:days===0?'今天到期':`已超 ${-days} 天`, kmText=km===null?'':km>0?`还剩 ${km} km`:km===0?'已到达':`已超 ${-km} km`;
+  return Object.assign({},plan,{dueDate,dueMileage,status,rank,urgency,days,km,daysText,kmText,stale,lastDate:last?last.date:''});
 }
-module.exports={TYPES,KINDS,today,assert,validDate,integer,fixed,money,typeOf,allowedKinds,currentMileage,validateTimeline,normalizeVehicle,normalizeRecord,energyIntervals,statistics,normalizePlan,reminder,addMonths};
+module.exports={TYPES,KINDS,PLAN_KINDS,today,assert,validDate,integer,fixed,money,typeOf,allowedKinds,currentMileage,validateTimeline,normalizeVehicle,normalizeRecord,energyIntervals,statistics,normalizePlan,reminder,addMonths};
