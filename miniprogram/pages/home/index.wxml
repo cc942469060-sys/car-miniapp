@@ -6,4 +6,4 @@
 <button class="primary" bindtap="addRecord" disabled="{{vehicle.archived}}">＋ 记一笔</button><view wx:if="{{vehicle.archived}}" class="notice">此车辆已归档，可在车辆页恢复后继续记录。</view>
 <view class="section"><text class="section-title">接下来，要记得</text><button class="quiet" bindtap="viewCare">全部提醒 →</button></view><view wx:for="{{plans}}" wx:key="id" class="card"><template is="plan-summary" data="{{plan:item}}"/></view><view wx:if="{{!plans.length}}" class="muted">暂无待办，去养护页添加一个计划吧。</view>
 <view class="section"><text class="section-title">最近记录</text><button class="quiet" bindtap="viewLedger">查看账本 →</button></view><template is="records" data="{{records:recent}}"/><view wx:if="{{!recent.length}}" class="muted">还没有记录，点击「记一笔」开始。</view>
-<view class="footer-note">数据保存在本机；清除缓存或更换设备可能导致数据丢失。里程更新：{{mileage.date}} · {{mileage.mileage}} km</view></block></view>
+<view class="footer-note">数据保存在本机；清除缓存或更换设备可能导致数据丢失，可在「车辆」页导出备份。里程更新：{{mileage.date}} · {{mileage.mileage}} km</view></block></view>

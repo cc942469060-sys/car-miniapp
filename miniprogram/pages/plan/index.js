@@ -5,5 +5,5 @@ Page(Object.assign({},U.common,{
  enableDate(e){this.setData({dateEnabled:e.detail.value,'form.dueDate':e.detail.value?this.data.pickerDate:'',error:''});},
  dateChange(e){this.setData({'form.dueDate':e.detail.value,pickerDate:e.detail.value,error:''});},
  save(){if(this.data.saving||!this.data.ready)return;this.setData({saving:true});const id=U.guard(this,()=>U.getStore().savePlan(this.data.form));if(id)U.saved();else this.setData({saving:false});},
- remove(){U.confirm('删除这个计划？已记录的保养费用会保留，计划关联会解除。',()=>U.guard(this,()=>{U.getStore().deletePlan(this.data.form.id);U.saved();}));}
+ remove(){U.confirm('删除这个计划？已记录的费用会保留，计划关联会解除。',()=>U.guard(this,()=>{U.getStore().deletePlan(this.data.form.id);U.saved('已删除');}));}
 }));
