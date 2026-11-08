@@ -5,7 +5,7 @@ Page(Object.assign({},U.common,{
  const planId=record?record.planId:options.planId,plan=planId?s.plans.find(p=>p.id===planId&&p.vehicleId===v.id):null;U.D.assert(!planId||plan,'关联计划不存在');
  // Read today on open, not at page registration. Mileage is never pre-filled: an unchanged stale reading would distort energy intervals.
  const today=U.D.today(),last=U.D.currentMileage(v,s.records),kinds=U.D.allowedKinds(v).filter(id=>!plan||U.D.PLAN_KINDS.includes(id)).map(id=>({id,name:U.D.KINDS[id]}));let form=Object.assign({},this.data.form,{vehicleId:v.id,kind:kinds[0].id,date:today});
- if(record)form=Object.assign(form,record,{mileage:record.mileage==null?'':String(record.mileage),amount:U.D.money(record.cents),quantity:record.quantity100?(record.quantity100/100).toFixed(2):'',socAfter:record.socAfter==null?'':String(record.socAfter)});
+ if(record)form=Object.assign(form,U.D.recordInput(record));
  else if(plan)form=Object.assign(form,{planId:plan.id,complete:true,note:plan.name});
  this.setData({vehicle:v,kinds,form,kindIndex:kinds.findIndex(k=>k.id===form.kind),planName:plan?plan.name:'',today,mileageHint:`最近读数 ${last.mileage} km（${last.date}）`,ready:true});wx.setNavigationBarTitle({title:record?'记录详情':'记一笔'});
  });},

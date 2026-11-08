@@ -76,6 +76,25 @@ test('归档车辆的记录和计划不能删除，恢复后可以',()=>{
  assert.throws(()=>store.deleteRecord(rid),/归档/);assert.throws(()=>store.deletePlan(pid),/归档/);assert.equal(store.read().records.length,1);assert.equal(store.read().plans.length,1);
  store.archiveVehicle(id,false);store.deleteRecord(rid);store.deletePlan(pid);assert.equal(store.read().records.length,0);assert.equal(store.read().plans.length,0);
 });
+function dataset(){
+ const fx=fixture(),s=fx.store,id=car(s),ev=car(s,'ev');const pid=s.savePlan({vehicleId:id,name:'保养',dueMileage:'5000',intervalKm:'5000'});
+ record(s,id);record(s,id,{kind:'service',date:'2025-01-03',mileage:'1200',amount:'300',planId:pid,complete:true});record(s,id,{kind:'other',date:'2025-01-04',mileage:'',amount:'15'});
+ record(s,ev,{kind:'charge',amount:'30',quantity:'20',socAfter:'80',confirmed:true});s.archiveVehicle(ev,true);s.select(id);return fx;
+}
+test('导出后恢复得到完全相同的数据，归档车辆及其记录一并保留',()=>{
+ const a=dataset().store,backup=JSON.parse(JSON.stringify(a.exportData()));assert.equal(backup.app,'car-miniapp');assert.ok(!isNaN(Date.parse(backup.exportedAt)));
+ const b=fixture().store;b.restore(backup);assert.deepEqual(b.read(),a.read());assert.equal(b.read().vehicles[1].archived,true);assert.equal(b.read().records.length,4);
+});
+test('损坏、不兼容或不完整的备份被拒绝并说明原因，本机数据不变',()=>{
+ const backup=JSON.parse(JSON.stringify(dataset().store.exportData())),r=backup.records,{store}=fixture();car(store);const before=store.read();
+ const cases=[[null,/不是车小记/],[{...backup,app:'other'},/不是车小记/],[{...backup,version:2},/更新版本/],[{...backup,plans:undefined},/格式不兼容/],[{...backup,vehicles:[]},/没有车辆/],[{...backup,records:[r[0],r[0]]},/第 2 条记录.*重复/],[{...backup,records:[{...r[0],cents:'10020'}]},/金额/],[{...backup,records:[{...r[0],vehicleId:'v_x'}]},/所属车辆不存在/],[{...backup,records:[{...r[1],planId:'p_x'}]},/关联计划不存在/],[{...backup,records:[{...r[0],date:'2025-01-05'},r[1]]},/「测试车」的累计里程/]];
+ for(const [raw,message] of cases)assert.throws(()=>store.restore(raw),message);assert.deepEqual(store.read(),before);
+});
+test('恢复写入失败不改数据；本机数据损坏时提示并仍可从备份恢复；更新版本的数据提示升级',()=>{
+ const backup=JSON.parse(JSON.stringify(dataset().store.exportData())),fx=fixture();car(fx.store);const before=fx.store.read();fx.fail();assert.throws(()=>fx.store.restore(backup),/恢复失败/);assert.deepEqual(fx.store.read(),before);
+ let data={version:'x'},writes=0;const broken=createStore({get:()=>data,set:v=>{writes++;data=v;}});assert.throws(()=>broken.read(),/不兼容.*从备份恢复/);broken.restore(backup);assert.equal(writes,1);assert.equal(broken.read().vehicles.length,2);
+ assert.throws(()=>createStore({get:()=>({version:2,vehicles:[],records:[],plans:[]}),set:()=>{}}).read(),/更新版本.*请先更新小程序/);
+});
 test('不兼容缓存必须保留，不能静默重置',()=>{
  let writes=0;const store=createStore({get:()=>({version:99}),set:()=>writes++});assert.throws(()=>store.read(),/不兼容/);assert.throws(()=>car(store),/不兼容/);assert.equal(writes,0);
 });

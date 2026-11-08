@@ -6,7 +6,8 @@ const TYPES = [
 ];
 const KINDS = { fuel: '加油', charge: '充电', service: '保养', other: '其他费用' };
 const PLAN_KINDS = ['service', 'other'];
-function today() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function dateOf(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function today() { return dateOf(new Date()); }
 function assert(ok, message) { if (!ok) throw new Error(message); }
 function validDate(s) { if (!/^\d{4}-\d{2}-\d{2}$/.test(s || '')) return false; const d = new Date(s+'T00:00:00Z'); return Number.isFinite(d.getTime()) && d.toISOString().slice(0,10) === s; }
 function integer(value, label, max = 9999999) { assert(String(value).trim() !== '' && /^\d+$/.test(String(value)), `${label}请输入非负整数`); const n = Number(value); assert(Number.isSafeInteger(n) && n <= max, `${label}超出范围`); return n; }
@@ -43,6 +44,8 @@ function normalizeRecord(input, v) {
   assert((!r.planId && !r.complete) || PLAN_KINDS.includes(r.kind), '只有保养或其他费用可完成养护计划');
   return r;
 }
+// A stored record as form input, so edited records and restored backups pass the same validation as new entries.
+function recordInput(r) { return Object.assign({}, r, { mileage:r.mileage==null ? '' : String(r.mileage), amount:money(r.cents), quantity:r.quantity100 ? (r.quantity100/100).toFixed(2) : '', socAfter:r.socAfter==null ? '' : String(r.socAfter) }); }
 // Only completed, explicitly valid intervals contribute; never average interval rates directly.
 // An interval closes at the next endpoint in the same state (full tank, or the same SOC after charging).
 // Endpoints in another state stay open as anchors; an endpoint at the anchor's mileage is folded into the next interval.
@@ -91,4 +94,4 @@ function reminder(plan, records, mileage, asOf=today()) {
   const daysText=days===null?'':days>0?`还剩 ${days} 天`:days===0?'今天到期':`已超 ${-days} 天`, kmText=km===null?'':km>0?`还剩 ${km} km`:km===0?'已到达':`已超 ${-km} km`;
   return Object.assign({},plan,{dueDate,dueMileage,status,rank,urgency,days,km,daysText,kmText,stale,lastDate:last?last.date:''});
 }
-module.exports={TYPES,KINDS,PLAN_KINDS,today,assert,validDate,integer,fixed,money,typeOf,allowedKinds,currentMileage,validateTimeline,normalizeVehicle,normalizeRecord,energyIntervals,statistics,normalizePlan,reminder,addMonths};
+module.exports={TYPES,KINDS,PLAN_KINDS,dateOf,today,assert,validDate,integer,fixed,money,typeOf,allowedKinds,currentMileage,validateTimeline,normalizeVehicle,normalizeRecord,recordInput,energyIntervals,statistics,normalizePlan,reminder,addMonths};

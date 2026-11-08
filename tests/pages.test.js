@@ -2,10 +2,11 @@ const {test,beforeEach}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path');
 const U=require('../miniprogram/utils/ui');
-let raw='',navigation=[],toasts=[];
+let raw='',navigation=[],toasts=[],modals=[],files={},shared=[];
 beforeEach(()=>{
- raw='';navigation=[];toasts=[];
- global.wx={getStorageSync:()=>raw,setStorageSync:(key,v)=>{raw=JSON.parse(JSON.stringify(v));},setNavigationBarTitle:()=>{},showToast:o=>toasts.push(o.title),navigateBack:()=>navigation.push('back'),navigateTo:o=>navigation.push(o.url),switchTab:o=>navigation.push(o.url),showModal:o=>o.success({confirm:true})};
+ raw='';navigation=[];toasts=[];modals=[];files={};shared=[];
+ global.wx={getStorageSync:()=>raw,setStorageSync:(key,v)=>{raw=JSON.parse(JSON.stringify(v));},setNavigationBarTitle:()=>{},showToast:o=>toasts.push(o.title),navigateBack:()=>navigation.push('back'),navigateTo:o=>navigation.push(o.url),switchTab:o=>navigation.push(o.url),showModal:o=>{modals.push(o.content);o.success({confirm:true});},
+  env:{USER_DATA_PATH:'wxfile://usr'},getFileSystemManager:()=>({writeFileSync:(p,d)=>{files[p]=d;},readFileSync:p=>{if(!(p in files))throw Error('no such file');return files[p];}}),shareFileMessage:o=>{shared.push(o);o.success();},chooseMessageFile:o=>o.fail({errMsg:'chooseMessageFile:fail cancel'})};
 });
 // Registering a page runs its module once, like an app launch; opening creates an instance from that registration.
 function definePage(name){let definition;global.Page=x=>{definition=x;};const file=require.resolve('../miniprogram/pages/'+name+'/index');delete require.cache[file];require(file);return definition;}
@@ -55,6 +56,22 @@ test('首页按紧急程度显示前两条计划；完成车险计划可记为�
  const home=loadPage('home');assert.deepEqual(home.data.plans.map(p=>p.name),['机油机滤','车险续期']);assert.equal(home.data.plans[0].kmText,'还剩 10 km');
  const entry=loadPage('entry',{vehicleId:id,planId:pid});assert.deepEqual(entry.data.kinds.map(k=>k.id),['service','other']);entry.kindChange({detail:{value:1}});entry.setData({'form.mileage':'29990','form.amount':'3800'});entry.save();
  assert.equal(raw.records[0].kind,'other');assert.equal(raw.records[0].complete,true);const care=loadPage('care');assert.equal(care.data.records.length,1);assert.equal(care.data.plans.find(p=>p.name==='车险续期').lastDate,today);
+});
+test('车库页导出备份并转发；恢复前校验并确认，替换数据后刷新页面',()=>{
+ const id=createCar('fuel');U.getStore().saveRecord({vehicleId:id,kind:'fuel',date:'2025-01-02',mileage:'1200',amount:'300',quantity:'40',full:true});const saved=JSON.parse(JSON.stringify(raw)),garage=loadPage('garage');
+ toasts=[];garage.exportBackup();assert.equal(shared.length,1);assert.match(shared[0].fileName,/^车小记备份-\d{4}-\d{2}-\d{2}\.json$/);assert.equal(JSON.parse(files[shared[0].filePath]).app,'car-miniapp');assert.deepEqual(toasts,['已导出']);
+ U.getStore().deleteRecord(raw.records[0].id);U.getStore().saveVehicle({name:'第二辆',type:'ev',baseDate:'2025-01-01',baseMileage:'10'});
+ wx.chooseMessageFile=o=>o.success({tempFiles:[{path:shared[0].filePath}]});garage.restoreBackup();
+ assert.match(modals.at(-1),/含 1 辆车、1 条记录、0 个计划/);assert.match(modals.at(-1),/现有 2 辆车、0 条记录/);assert.deepEqual(raw,saved);assert.equal(garage.data.cars.length,1);assert.equal(toasts.at(-1),'已恢复');
+});
+test('选择无效文件、取消或接口失败时提示原因，不弹确认也不改数据',()=>{
+ createCar();const before=JSON.parse(JSON.stringify(raw)),garage=loadPage('garage'),choose=path=>{wx.chooseMessageFile=o=>o.success({tempFiles:[{path}]});garage.restoreBackup();};
+ files['wxfile://tmp/a.json']='not json';choose('wxfile://tmp/a.json');assert.match(garage.data.error,/无法读取/);
+ files['wxfile://tmp/b.json']=JSON.stringify({app:'car-miniapp',version:1,vehicles:[],records:[],plans:[]});choose('wxfile://tmp/b.json');assert.match(garage.data.error,/没有车辆/);
+ wx.chooseMessageFile=o=>o.fail({errMsg:'chooseMessageFile:fail cancel'});garage.restoreBackup();assert.equal(garage.data.error,'');
+ wx.chooseMessageFile=o=>o.fail({errMsg:'chooseMessageFile:fail api scope is not declared in the privacy agreement'});garage.restoreBackup();assert.match(garage.data.error,/未能选择文件.*privacy/);
+ wx.shareFileMessage=o=>o.fail({errMsg:'shareFileMessage:fail cancel'});garage.exportBackup();assert.equal(garage.data.error,'');
+ assert.equal(modals.length,0);assert.deepEqual(raw,before);
 });
 test('所有页面含已绑定事件方法，导入模板可解析，空数据页面不报错',()=>{
  function sources(file){const text=fs.readFileSync(file,'utf8');let result=text;for(const m of text.matchAll(/<import\s+src="([^"]+)"/g))result+='\n'+sources(path.resolve(path.dirname(file),m[1]));return result;}
