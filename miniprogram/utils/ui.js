@@ -21,6 +21,9 @@ const common={
   viewLedger(){wx.switchTab({url:'/pages/ledger/index'});},
   viewCare(){wx.switchTab({url:'/pages/care/index'});},
   viewStats(){wx.navigateTo({url:'/pages/stats/index'});},
+  viewGarage(){wx.switchTab({url:'/pages/garage/index'});},
+  // Records an odometer reading without an expense, e.g. when a reminder says the last reading is old.
+  updateMileage(){const v=this.data.vehicle,m=this.data.mileage;if(!v)return;wx.showModal({title:'更新当前里程',editable:true,placeholderText:`仪表上的累计里程，上次 ${m.mileage} km`,confirmText:'保存',success:r=>{if(r.confirm)guard(this,()=>{getStore().updateMileage(v.id,r.content);wx.showToast({title:'已更新',icon:'success'});this.onShow();});}});},
   input(e){this.setData({['form.'+e.currentTarget.dataset.field]:e.detail.value,error:''});},
   toggle(e){this.setData({['form.'+e.currentTarget.dataset.field]:e.detail.value,error:''});},
   cancel(){back();}
