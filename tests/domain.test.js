@@ -95,6 +95,26 @@ test('恢复写入失败不改数据；本机数据损坏时提示并仍可从�
  let data={version:'x'},writes=0;const broken=createStore({get:()=>data,set:v=>{writes++;data=v;}});assert.throws(()=>broken.read(),/不兼容.*从备份恢复/);broken.restore(backup);assert.equal(writes,1);assert.equal(broken.read().vehicles.length,2);
  assert.throws(()=>createStore({get:()=>({version:2,vehicles:[],records:[],plans:[]}),set:()=>{}}).read(),/更新版本.*请先更新小程序/);
 });
+test('算不出能耗时说明原因和下一步',()=>{
+ const hint=(rows,kind='fuel')=>D.energyIntervals(rows,kind).hint,f=(n,mileage,extra)=>Object.assign({id:'f'+n,kind:'fuel',date:'2025-01-0'+n,mileage,quantity100:3000,full:true},extra),c=(n,mileage,extra)=>Object.assign({id:'c'+n,kind:'charge',date:'2025-01-0'+n,mileage,quantity100:2000,socAfter:80,confirmed:true},extra);
+ assert.match(hint([]),/加满油后记一笔/);assert.match(hint([f(1,1000,{full:false})]),/打开「本次已加满」/);assert.match(hint([f(1,1000)]),/已有一次加满/);assert.match(hint([f(1,1000),f(2,1300,{full:false,gap:true})]),/标记了漏记/);assert.equal(hint([f(1,1000),f(2,1300)]),'');
+ assert.match(hint([],'charge'),/充电后电量/);assert.match(hint([c(1,1000,{socAfter:null})],'charge'),/填写「充电后电量」/);assert.match(hint([c(1,1000),c(2,1100,{socAfter:60})],'charge'),/下次充到 80% 或 60%/);assert.match(hint([c(1,1000),c(2,1100,{socAfter:null,confirmed:false})],'charge'),/未确认都已记录/);
+});
+test('录入合理性：里程跳变、超大补能量与异常单价给出提醒，正常记录不提醒',()=>{
+ const v={id:'v',type:'phev',baseDate:'2025-01-01',baseMileage:1000},prior=[{id:'a',vehicleId:'v',kind:'fuel',date:'2025-01-02',mileage:1300,cents:30000,quantity100:4000,full:true}];
+ const warn=over=>D.recordWarnings(Object.assign({id:'n',vehicleId:'v',kind:'fuel',date:'2025-01-05',mileage:1600,cents:30000,quantity100:4000},over),v,prior).join('；');
+ assert.equal(warn({}),'');assert.equal(warn({mileage:4500,date:'2025-01-30'}),'');assert.match(warn({mileage:13000}),/2025-01-02 的 1300 km 多出 11700 km/);assert.match(warn({quantity100:15000,cents:112500}),/超过常见油箱容量/);assert.match(warn({cents:3000}),/单价约 ¥0\.75\/L/);assert.match(warn({kind:'charge',cents:60000,quantity100:2000}),/¥30\.00\/kWh/);
+});
+test('充电记录只保留「充电都已记录」一个开关，不再保存漏记标记',()=>{
+ const {store}=fixture(),id=car(store,'ev');record(store,id,{kind:'charge',quantity:'30',amount:'20',gap:true,confirmed:true});const r=store.read().records[0];assert.equal('gap' in r,false);assert.equal(r.confirmed,true);
+});
+test('计划模板按能源类型提供；更新里程写入当天读数，清除过期提示，不能小于已有记录，归档车辆不可更新',()=>{
+ assert.ok(D.planPresets({type:'fuel'}).some(p=>p.name==='机油机滤'));assert.ok(!D.planPresets({type:'ev'}).some(p=>p.name==='机油机滤'));
+ const {store}=fixture(),id=car(store);record(store,id,{mileage:'1500'});store.savePlan({vehicleId:id,name:'保养',dueMileage:'20000'});let s=store.read();assert.equal(D.reminder(s.plans[0],s.records,D.currentMileage(s.vehicles[0],s.records)).stale,true);
+ assert.throws(()=>store.updateMileage(id,'1400'),/不能小于已记录的 1500 km/);assert.throws(()=>store.updateMileage(id,'abc'),/当前里程/);
+ store.updateMileage(id,'12,345');s=store.read();const now=D.currentMileage(s.vehicles[0],s.records);assert.deepEqual(now,{date:D.today(),mileage:12345});assert.equal(D.reminder(s.plans[0],s.records,now).stale,false);
+ store.archiveVehicle(id,true);assert.throws(()=>store.updateMileage(id,'13000'),/归档/);
+});
 test('不兼容缓存必须保留，不能静默重置',()=>{
  let writes=0;const store=createStore({get:()=>({version:99}),set:()=>writes++});assert.throws(()=>store.read(),/不兼容/);assert.throws(()=>car(store),/不兼容/);assert.equal(writes,0);
 });

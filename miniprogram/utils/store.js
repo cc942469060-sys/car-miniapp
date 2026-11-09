@@ -44,6 +44,8 @@ function createStore(storage){
     select(id){return change(s=>{D.assert(s.vehicles.some(v=>v.id===id),'车辆不存在');s.currentId=id;});},
     saveVehicle(input){return change(s=>{const existing=s.vehicles.find(v=>v.id===input.id);D.assert(!input.id||existing,'车辆不存在');const v=D.normalizeVehicle(Object.assign({},input,{id:input.id||uid('v')}),existing,s.records);if(existing)s.vehicles[s.vehicles.indexOf(existing)]=v;else s.vehicles.push(v);s.currentId=v.id;return v.id;});},
     archiveVehicle(id,archived){return change(s=>{const v=s.vehicles.find(x=>x.id===id);D.assert(v,'车辆不存在');v.archived=archived;if(archived&&s.currentId===id)s.currentId=(s.vehicles.find(x=>!x.archived)||{}).id||id;});},
+    // An odometer reading without an expense becomes the vehicle's manual reading for today.
+    updateMileage(id,value){return change(s=>{const v=s.vehicles.find(x=>x.id===id);D.assert(v&&!v.archived,'车辆不存在或已归档');const mileage=D.integer(String(value==null?'':value).replace(/[,，\s]/g,''),'当前里程'),now=D.currentMileage(v,s.records);D.assert(mileage>=now.mileage,`当前里程不能小于已记录的 ${now.mileage} km`);v.baseDate=D.today();v.baseMileage=mileage;D.validateTimeline(v,s.records);return mileage;});},
     saveRecord(input){return change(s=>{
       const old=s.records.find(r=>r.id===input.id);D.assert(!input.id||old,'记录不存在');
       const v=s.vehicles.find(x=>x.id===input.vehicleId);const r=D.normalizeRecord(Object.assign({},input,{id:input.id||uid('r')}),v);

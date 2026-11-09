@@ -2,10 +2,11 @@ const {test,beforeEach}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path');
 const U=require('../miniprogram/utils/ui');
-let raw='',navigation=[],toasts=[],modals=[],files={},shared=[];
+// `raw` is the app data key; other keys (such as the last-backup marker) live in `side`. `answer` is what the next modal returns.
+let raw='',side={},navigation=[],toasts=[],modals=[],files={},shared=[],answer={confirm:true};
 beforeEach(()=>{
- raw='';navigation=[];toasts=[];modals=[];files={};shared=[];
- global.wx={getStorageSync:()=>raw,setStorageSync:(key,v)=>{raw=JSON.parse(JSON.stringify(v));},setNavigationBarTitle:()=>{},showToast:o=>toasts.push(o.title),navigateBack:()=>navigation.push('back'),navigateTo:o=>navigation.push(o.url),switchTab:o=>navigation.push(o.url),showModal:o=>{modals.push(o.content);o.success({confirm:true});},
+ raw='';side={};navigation=[];toasts=[];modals=[];files={};shared=[];answer={confirm:true};
+ global.wx={getStorageSync:key=>key==='car-miniapp:v1'?raw:(side[key]||''),setStorageSync:(key,v)=>{const copy=JSON.parse(JSON.stringify(v));if(key==='car-miniapp:v1')raw=copy;else side[key]=copy;},setNavigationBarTitle:()=>{},showToast:o=>toasts.push(o.title),navigateBack:()=>navigation.push('back'),navigateTo:o=>navigation.push(o.url),switchTab:o=>navigation.push(o.url),showModal:o=>{modals.push(o.content||o.placeholderText);o.success(answer);},
   env:{USER_DATA_PATH:'wxfile://usr'},getFileSystemManager:()=>({writeFileSync:(p,d)=>{files[p]=d;},readFileSync:p=>{if(!(p in files))throw Error('no such file');return files[p];}}),shareFileMessage:o=>{shared.push(o);o.success();},chooseMessageFile:o=>o.fail({errMsg:'chooseMessageFile:fail cancel'})};
 });
 // Registering a page runs its module once, like an app launch; opening creates an instance from that registration.
@@ -72,6 +73,32 @@ test('选择无效文件、取消或接口失败时提示原因，不弹确认�
  wx.chooseMessageFile=o=>o.fail({errMsg:'chooseMessageFile:fail api scope is not declared in the privacy agreement'});garage.restoreBackup();assert.match(garage.data.error,/未能选择文件.*privacy/);
  wx.shareFileMessage=o=>o.fail({errMsg:'shareFileMessage:fail cancel'});garage.exportBackup();assert.equal(garage.data.error,'');
  assert.equal(modals.length,0);assert.deepEqual(raw,before);
+});
+test('新记录沿用上次的加满与充电完整选择，并提示上次充电后电量',()=>{
+ const id=createCar();let entry=loadPage('entry',{vehicleId:id});assert.equal(entry.data.form.full,false);assert.equal(entry.data.form.confirmed,false);assert.equal(entry.data.socHint,'如 80');
+ U.getStore().saveRecord({vehicleId:id,kind:'fuel',date:'2025-01-02',mileage:'1100',amount:'300',quantity:'40',full:true});U.getStore().saveRecord({vehicleId:id,kind:'charge',date:'2025-01-03',mileage:'1150',amount:'20',quantity:'30',socAfter:'80',confirmed:true});
+ entry=loadPage('entry',{vehicleId:id});assert.equal(entry.data.form.full,true);assert.equal(entry.data.form.confirmed,true);assert.equal(entry.data.socHint,'上次充到 80%');
+});
+test('疑似录错时先确认：取消不保存，确认后保存',()=>{
+ const id=createCar('fuel'),entry=loadPage('entry',{vehicleId:id});entry.setData({'form.date':'2025-01-02','form.mileage':'12000','form.amount':'300','form.quantity':'40','form.full':true});
+ answer={confirm:false};entry.save();assert.match(modals.at(-1),/多出 11000 km/);assert.equal(raw.records.length,0);assert.equal(entry.data.saving,false);
+ answer={confirm:true};entry.save();assert.equal(raw.records.length,1);
+});
+test('首页和统计页说明算不出油耗的原因；首页可直接更新里程',()=>{
+ const id=createCar('fuel');let home=loadPage('home');assert.equal(home.data.metrics[1].value,'—');assert.match(home.data.metrics[1].note,/加满油后记一笔/);
+ U.getStore().saveRecord({vehicleId:id,kind:'fuel',date:'2025-01-02',mileage:'1100',amount:'300',quantity:'40',full:true});home=loadPage('home');assert.match(home.data.metrics[1].note,/已有一次加满/);assert.match(loadPage('stats').data.energy[0].result.hint,/已有一次加满/);
+ answer={confirm:true,content:'1,350'};home.updateMileage();assert.match(modals.at(-1),/上次 1100 km/);assert.equal(home.data.mileage.mileage,1350);assert.equal(raw.vehicles[0].baseMileage,1350);
+});
+test('新建计划可套用模板；车险需要选择实际到期日期',()=>{
+ const id=createCar('ev'),plan=loadPage('plan',{vehicleId:id});assert.ok(!plan.data.presets.some(p=>p.name==='机油机滤'));
+ plan.applyPreset({currentTarget:{dataset:{index:plan.data.presets.findIndex(p=>p.name==='轮胎换位')}}});assert.equal(plan.data.form.intervalKm,'10000');assert.equal(plan.data.form.dueMileage,'11000');assert.equal(plan.data.dateEnabled,false);plan.save();assert.equal(raw.plans[0].name,'轮胎换位');
+ const next=loadPage('plan',{vehicleId:id});next.applyPreset({currentTarget:{dataset:{index:next.data.presets.findIndex(p=>p.name==='车险续期')}}});assert.equal(next.data.dateEnabled,true);assert.equal(next.data.form.dueDate,'');next.save();assert.match(next.data.error,/至少设置到期日期/);
+ next.dateChange({detail:{value:'2026-12-31'}});next.save();assert.equal(raw.plans[1].intervalMonths,12);assert.equal(raw.plans[1].dueDate,'2026-12-31');
+});
+test('记录较多且没有备份时首页提醒；导出后车库页显示上次备份日期，提醒消失',()=>{
+ const id=createCar('fuel');for(let i=0;i<10;i++)U.getStore().saveRecord({vehicleId:id,kind:'other',date:'2025-01-02',mileage:'',amount:'10'});
+ assert.match(loadPage('home').data.backupNudge,/已有 10 条记录还没有备份过/);
+ const garage=loadPage('garage');assert.equal(garage.data.backupAt,'');garage.exportBackup();assert.equal(garage.data.backupAt,U.D.today());assert.equal(loadPage('home').data.backupNudge,'');
 });
 test('所有页面含已绑定事件方法，导入模板可解析，空数据页面不报错',()=>{
  function sources(file){const text=fs.readFileSync(file,'utf8');let result=text;for(const m of text.matchAll(/<import\s+src="([^"]+)"/g))result+='\n'+sources(path.resolve(path.dirname(file),m[1]));return result;}
