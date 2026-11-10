@@ -18,6 +18,12 @@ npm run check
 
 无需执行 npm install 或构建 npm。
 
+格式化 JS 与 WXSS（配置见 `.prettierrc.json`；首次运行会通过 npx 下载 Prettier 3.9.10，WXML 保持手写格式）：
+
+```powershell
+npm run format
+```
+
 ## 已实现
 
 - 四个主页面：概览、账本、养护、车辆；四个子页面：记录、车辆表单、计划表单、统计。
