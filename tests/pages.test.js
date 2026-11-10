@@ -100,6 +100,29 @@ test('记录较多且没有备份时首页提醒；导出后车库页显示上�
  assert.match(loadPage('home').data.backupNudge,/已有 10 条记录还没有备份过/);
  const garage=loadPage('garage');assert.equal(garage.data.backupAt,'');garage.exportBackup();assert.equal(garage.data.backupAt,U.D.today());assert.equal(loadPage('home').data.backupNudge,'');
 });
+test('账本和首页的记录显示单价与本箱油耗',()=>{
+ const id=createCar('fuel'),store=U.getStore();store.saveRecord({vehicleId:id,kind:'fuel',date:'2025-01-02',mileage:'1100',amount:'300',quantity:'40',full:true});store.saveRecord({vehicleId:id,kind:'fuel',date:'2025-01-09',mileage:'1600',amount:'270',quantity:'36',full:true});
+ const ledger=loadPage('ledger');ledger.monthChange({detail:{value:'2025-01'}});assert.equal(ledger.data.records[0].detail,'¥7.50/L · 油耗 7.20 L/100km');assert.equal(ledger.data.records[1].detail,'¥7.50/L');
+ assert.equal(loadPage('home').data.recent[0].detail,'¥7.50/L · 油耗 7.20 L/100km');
+});
+test('填写金额和单价自动算出油量；手动改过油量后不再覆盖，清空后恢复',()=>{
+ const id=createCar('fuel'),entry=loadPage('entry',{vehicleId:id}),type=(field,value)=>entry.input({currentTarget:{dataset:{field}},detail:{value}});
+ type('amount','300');type('price','7.5');assert.equal(entry.data.form.quantity,'40.00');type('quantity','39.8');type('amount','299');assert.equal(entry.data.form.quantity,'39.8');type('quantity','');type('price','7.48');assert.equal(entry.data.form.quantity,'39.97');
+});
+test('其他费用可选类别；完成车险计划默认归为保险；账本标题显示类别',()=>{
+ const id=createCar('fuel'),pid=U.getStore().savePlan({vehicleId:id,name:'车险续期',dueDate:'2025-02-01'});assert.equal(loadPage('entry',{vehicleId:id,planId:pid}).data.form.category,'保险');
+ const entry=loadPage('entry',{vehicleId:id});entry.kindChange({detail:{value:entry.data.kinds.findIndex(k=>k.id==='other')}});entry.pickCategory({currentTarget:{dataset:{value:'停车'}}});entry.setData({'form.date':'2025-01-02','form.amount':'15'});entry.save();
+ assert.equal(raw.records[0].category,'停车');const ledger=loadPage('ledger');ledger.monthChange({detail:{value:'2025-01'}});assert.equal(ledger.data.records[0].title,'停车');
+});
+test('统计页：年度与累计、近 12 个月、日均里程与能源成本；多车时可看全部车辆合计；计划显示预计到达',()=>{
+ const id=createCar('fuel'),store=U.getStore();store.saveRecord({vehicleId:id,kind:'fuel',date:'2025-01-02',mileage:'1100',amount:'300',quantity:'40',full:true});store.saveRecord({vehicleId:id,kind:'fuel',date:'2025-01-30',mileage:'1600',amount:'270',quantity:'36',full:true});
+ const stats=loadPage('stats');stats.monthChange({detail:{value:'2025-01'}});
+ assert.equal(stats.data.yearAmount,'570.00');assert.equal(stats.data.totalAmount,'570.00');assert.equal(stats.data.firstDate,'2025-01-02');assert.equal(stats.data.trend.length,12);assert.equal(stats.data.trend[11].percent,100);
+ assert.equal(stats.data.miles.daily,20.7);assert.equal(stats.data.energy[0].result.costPerKm,'0.54');assert.equal(stats.data.energy[0].recent[0].rate,'7.20');assert.equal(stats.data.multi,false);
+ const ev=store.saveVehicle({name:'电车',type:'ev',baseDate:'2025-01-01',baseMileage:'10'});store.saveRecord({vehicleId:ev,kind:'charge',date:'2025-01-05',mileage:'200',amount:'30',quantity:'40'});store.select(id);
+ stats.onShow();assert.equal(stats.data.multi,true);stats.scopeChange({currentTarget:{dataset:{scope:'all'}}});assert.equal(stats.data.amount,'600.00');assert.equal(stats.data.energy.length,0);
+ store.savePlan({vehicleId:id,name:'保养',dueMileage:'2000'});assert.match(loadPage('home').data.plans[0].predictText,/按日均 20.7 km 推算可能已到达/);
+});
 test('所有页面含已绑定事件方法，导入模板可解析，空数据页面不报错',()=>{
  function sources(file){const text=fs.readFileSync(file,'utf8');let result=text;for(const m of text.matchAll(/<import\s+src="([^"]+)"/g))result+='\n'+sources(path.resolve(path.dirname(file),m[1]));return result;}
  for(const name of ['home','ledger','care','garage','stats','vehicle','entry','plan']){

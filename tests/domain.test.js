@@ -115,6 +115,25 @@ test('计划模板按能源类型提供；更新里程写入当天读数，清�
  store.updateMileage(id,'12,345');s=store.read();const now=D.currentMileage(s.vehicles[0],s.records);assert.deepEqual(now,{date:D.today(),mileage:12345});assert.equal(D.reminder(s.plans[0],s.records,now).stale,false);
  store.archiveVehicle(id,true);assert.throws(()=>store.updateMileage(id,'13000'),/归档/);
 });
+test('能耗区间给出每段油耗与花费，能源成本只按完整区间计算',()=>{
+ const rows=[{id:'a',kind:'fuel',date:'2025-01-01',mileage:1000,cents:30000,quantity100:4000,full:true},{id:'b',kind:'fuel',date:'2025-01-08',mileage:1500,cents:27000,quantity100:3600,full:true},{id:'c',kind:'fuel',date:'2025-01-15',mileage:1700,cents:9000,quantity100:1200,full:false}];
+ const e=D.energyIntervals(rows,'fuel');assert.deepEqual(e.intervals.map(i=>[i.toId,i.km,i.rate,i.cents]),[['b',500,'7.20',27000]]);assert.equal(e.costPerKm,'0.54');
+});
+test('统计支持按年汇总、其他费用分类与近 12 个月趋势',()=>{
+ const rows=[{kind:'fuel',date:'2025-12-20',cents:30000,quantity100:4000},{kind:'other',category:'停车',date:'2026-01-06',cents:1500},{kind:'other',date:'2026-01-07',cents:500},{kind:'service',date:'2026-02-01',cents:80000}];
+ const y=D.statistics(rows,'2026');assert.equal(y.total,82000);assert.equal(y.count,3);assert.deepEqual(y.others,[{name:'停车',cents:1500},{name:'其他',cents:500}]);
+ const t=D.monthlyTrend(rows,'2026-02');assert.equal(t.length,12);assert.equal(t[0].month,'2025-03');assert.deepEqual(t.slice(-3).map(x=>[x.month,x.cents]),[['2025-12',30000],['2026-01',2000],['2026-02',80000]]);
+});
+test('其他费用保存类别，未知类别归为其他',()=>{
+ const {store}=fixture(),id=car(store);record(store,id,{kind:'other',mileage:'',amount:'15',category:'停车'});record(store,id,{kind:'other',mileage:'',amount:'5',category:'乱写'});
+ assert.deepEqual(store.read().records.map(r=>r.category),['停车','其他']);
+});
+test('日均里程需要 14 天以上的读数；里程计划按日均推算预计到达日期',()=>{
+ const v={id:'v',type:'fuel',baseDate:'2025-01-01',baseMileage:1000},rows=[{id:'a',vehicleId:'v',date:'2025-01-11',mileage:1300},{id:'b',vehicleId:'v',date:'2025-04-11',mileage:4000},{id:'c',vehicleId:'v',date:'2025-06-30',mileage:6400}];
+ assert.equal(D.mileageStats(v,rows.slice(0,1)).dailyKm,0);assert.deepEqual(D.mileageStats(v,rows),{dailyKm:30,from:'2025-01-11',to:'2025-06-30'});
+ const p=D.normalizePlan({id:'p',name:'保养',dueMileage:7000},'v'),now={mileage:6400,date:'2025-06-30'};
+ assert.equal(D.reminder(p,[],now,'2025-07-01',30).predictText,'预计 2025-07-20 前后到达，按日均 30 km 估算');assert.match(D.reminder(p,[],now,'2025-08-01',30).predictText,/可能已到达/);assert.equal(D.reminder(p,[],now,'2025-07-01').predictText,'');
+});
 test('不兼容缓存必须保留，不能静默重置',()=>{
  let writes=0;const store=createStore({get:()=>({version:99}),set:()=>writes++});assert.throws(()=>store.read(),/不兼容/);assert.throws(()=>car(store),/不兼容/);assert.equal(writes,0);
 });
