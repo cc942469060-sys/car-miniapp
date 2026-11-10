@@ -9,11 +9,11 @@
 </template>
 <template name="records">
   <view wx:for="{{records}}" wx:key="id" class="row" data-id="{{item.id}}" bindtap="openRecord" aria-role="button" aria-label="{{item.title}} {{item.date}} {{item.amount}}元，查看详情">
-    <view class="symbol">{{item.symbol}}</view><view class="row-main"><view class="row-title">{{item.title}}<text wx:if="{{item.quantity}}"> · {{item.quantity}} {{item.unit}}</text></view><view class="row-meta">{{item.date}}<text wx:if="{{item.mileage !== null}}"> · {{item.mileage}} km</text></view><view class="row-meta" wx:if="{{item.note}}">{{item.note}}</view></view><view class="row-price">¥{{item.amount}}</view>
+    <view class="symbol">{{item.symbol}}</view><view class="row-main"><view class="row-title">{{item.title}}<text wx:if="{{item.quantity}}"> · {{item.quantity}} {{item.unit}}</text></view><view class="row-meta">{{item.date}}<text wx:if="{{item.mileage !== null}}"> · {{item.mileage}} km</text></view><view class="row-meta" wx:if="{{item.detail}}">{{item.detail}}</view><view class="row-meta" wx:if="{{item.note}}">{{item.note}}</view></view><view class="row-price">¥{{item.amount}}</view>
   </view>
 </template>
 <template name="plan-summary">
   <view class="plan-title"><text class="row-title">{{plan.name}}</text><text class="badge {{plan.rank === 0 ? 'urgent' : ''}}">{{plan.status}}</text></view>
-  <view class="row-meta" wx:if="{{plan.dueDate}}">到期日期 · {{plan.dueDate}} · {{plan.daysText}}</view><view class="row-meta" wx:if="{{plan.dueMileage !== null}}">到期里程 · {{plan.dueMileage}} km · {{plan.kmText}}</view>
+  <view class="row-meta" wx:if="{{plan.dueDate}}">到期日期 · {{plan.dueDate}} · {{plan.daysText}}</view><view class="row-meta" wx:if="{{plan.dueMileage !== null}}">到期里程 · {{plan.dueMileage}} km · {{plan.kmText}}</view><view class="tiny" wx:if="{{plan.predictText}}">{{plan.predictText}}</view>
   <view class="tiny" wx:if="{{plan.dueDate && plan.dueMileage !== null}}">日期或里程，任一条件先到即提醒</view><view class="tiny" wx:if="{{plan.stale}}">里程超过 30 天未更新，请核对实际里程 · <text class="link" bindtap="updateMileage" aria-role="button">更新里程</text></view><view class="tiny" wx:if="{{plan.lastDate}}">最近完成 · {{plan.lastDate}}</view>
 </template>

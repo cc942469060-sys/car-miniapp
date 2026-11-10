@@ -6,6 +6,7 @@ const TYPES = [
 ];
 const KINDS = { fuel: '加油', charge: '充电', service: '保养', other: '其他费用' };
 const PLAN_KINDS = ['service', 'other'];
+const OTHER_CATEGORIES = ['停车', '通行', '洗车', '保险', '年检', '维修', '罚款', '其他'];
 function dateOf(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function today() { return dateOf(new Date()); }
 function assert(ok, message) { if (!ok) throw new Error(message); }
@@ -42,6 +43,8 @@ function normalizeRecord(input, v) {
     // A single switch covers completeness for charging: every charge since the previous one is recorded.
     r.confirmed = !!input.confirmed;
   }
+  // Records saved before categories existed, or with an unknown one, count as 其他.
+  if (r.kind === 'other') r.category = OTHER_CATEGORIES.includes(input.category) ? input.category : '其他';
   assert((!r.planId && !r.complete) || PLAN_KINDS.includes(r.kind), '只有保养或其他费用可完成养护计划');
   return r;
 }
@@ -68,16 +71,17 @@ function energyIntervals(records, kind) {
   let open=[], endpoints=0; const intervals=[];
   sorted.forEach(r=>{
     const broken = r.gap || (kind==='charge' && !r.confirmed);
-    open = broken ? [] : open.map(a=>({record:a.record,quantity:a.quantity+r.quantity100}));
+    open = broken ? [] : open.map(a=>({record:a.record,quantity:a.quantity+r.quantity100,cents:a.cents+(r.cents||0)}));
     if(!(kind==='fuel' ? r.full : r.socAfter != null)) return;
     endpoints++;
     const anchor = open.find(a=>kind==='fuel' || a.record.socAfter===r.socAfter);
     if(anchor && r.mileage<=anchor.record.mileage) return;
-    if(anchor) { intervals.push({from:anchor.record.date,to:r.date,km:r.mileage-anchor.record.mileage,quantity100:anchor.quantity}); open=[]; }
-    open.push({record:r,quantity:0});
+    if(anchor) { const km=r.mileage-anchor.record.mileage; intervals.push({from:anchor.record.date,to:r.date,toId:r.id,km,quantity100:anchor.quantity,cents:anchor.cents,rate:(anchor.quantity/km).toFixed(2)}); open=[]; }
+    open.push({record:r,quantity:0,cents:0});
   });
-  const km=intervals.reduce((s,x)=>s+x.km,0), q=intervals.reduce((s,x)=>s+x.quantity100,0), rate=km ? (q/km).toFixed(2) : null;
-  return { intervals, km, rate, hint:rate ? '' : energyHint(kind,sorted.length,endpoints,open) };
+  // Energy cost per km uses the same complete intervals, so it never mixes in spending without matching mileage.
+  const km=intervals.reduce((s,x)=>s+x.km,0), q=intervals.reduce((s,x)=>s+x.quantity100,0), c=intervals.reduce((s,x)=>s+x.cents,0), rate=km ? (q/km).toFixed(2) : null;
+  return { intervals, km, rate, costPerKm:km ? (c/km/100).toFixed(2) : null, hint:rate ? '' : energyHint(kind,sorted.length,endpoints,open) };
 }
 // Why no rate is shown yet, and which record would produce one.
 function energyHint(kind, count, endpoints, open) {
@@ -87,11 +91,23 @@ function energyHint(kind, count, endpoints, open) {
   if (!endpoints) return fuel ? '加满时打开「本次已加满」，两次加满即可算出油耗' : '填写「充电后电量」后才能算出电耗';
   return fuel ? '最近一次标记了漏记，下次加满后重新开始计算' : '最近一次充电未确认都已记录，下次充电后重新开始计算';
 }
-function statistics(records, month) {
-  const filtered=records.filter(r=>r.date.slice(0,7)===month), categories=Object.keys(KINDS).map(kind=>({kind,name:KINDS[kind],cents:filtered.filter(r=>r.kind===kind).reduce((s,r)=>s+r.cents,0)}));
-  return { total:filtered.reduce((s,r)=>s+r.cents,0), count:filtered.length, fuel:filtered.filter(r=>r.kind==='fuel').reduce((s,r)=>s+r.quantity100,0), charge:filtered.filter(r=>r.kind==='charge').reduce((s,r)=>s+r.quantity100,0), categories };
+// `period` is a month (YYYY-MM) or a year (YYYY).
+function statistics(records, period) {
+  const filtered=records.filter(r=>r.date.startsWith(period)), categories=Object.keys(KINDS).map(kind=>({kind,name:KINDS[kind],cents:filtered.filter(r=>r.kind===kind).reduce((s,r)=>s+r.cents,0)}));
+  const others=OTHER_CATEGORIES.map(name=>({name,cents:filtered.filter(r=>r.kind==='other'&&(r.category||'其他')===name).reduce((s,r)=>s+r.cents,0)})).filter(x=>x.cents);
+  return { total:filtered.reduce((s,r)=>s+r.cents,0), count:filtered.length, fuel:filtered.filter(r=>r.kind==='fuel').reduce((s,r)=>s+r.quantity100,0), charge:filtered.filter(r=>r.kind==='charge').reduce((s,r)=>s+r.quantity100,0), categories, others };
 }
 function addMonths(date, count) { const [y,m,d]=date.split('-').map(Number); const end=new Date(Date.UTC(y,m-1+count+1,0)).getUTCDate(); return new Date(Date.UTC(y,m-1+count,Math.min(d,end))).toISOString().slice(0,10); }
+function addDays(date, count) { const d=new Date(date+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+count); return d.toISOString().slice(0,10); }
+// Spending per month for the `count` months ending at `month`, oldest first.
+function monthlyTrend(records, month, count = 12) { return Array.from({length:count},(_,i)=>addMonths(month+'-01',i-count+1).slice(0,7)).map(m=>({month:m,cents:records.filter(r=>r.date.slice(0,7)===m).reduce((s,r)=>s+r.cents,0)})); }
+// Average daily distance from odometer readings: from the last reading at least 90 days before the latest one (or the first reading),
+// and only once the readings span 14+ days.
+function mileageStats(v, records) {
+  const points=[{date:v.baseDate,mileage:v.baseMileage}].concat(records.filter(r=>r.vehicleId===v.id&&r.mileage!=null)).sort((a,b)=>a.date.localeCompare(b.date)||a.mileage-b.mileage), last=points[points.length-1];
+  const start=addDays(last.date,-90), from=points.filter(p=>p.date<=start).pop()||points[0], days=daysBetween(last.date,from.date);
+  return days>=14&&last.mileage>from.mileage ? {dailyKm:Math.round((last.mileage-from.mileage)/days*10)/10,from:from.date,to:last.date} : {dailyKm:0,from:'',to:''};
+}
 // Common starting points only: real intervals come from the owner's manual, so every field stays editable.
 const PLAN_PRESETS = [
   { name: '机油机滤', months: 6, km: 5000, engine: true },
@@ -111,7 +127,7 @@ function normalizePlan(input, vehicleId) {
   assert(p.intervalMonths<=120,'重复周期不能超过 120 个月'); return p;
 }
 function daysBetween(a,b){return Math.round((Date.parse(a+'T00:00:00Z')-Date.parse(b+'T00:00:00Z'))/86400000);}
-function reminder(plan, records, mileage, asOf=today()) {
+function reminder(plan, records, mileage, asOf=today(), dailyKm=0) {
   const completions=records.filter(r=>r.planId===plan.id && r.complete).sort((a,b)=>b.date.localeCompare(a.date)||b.mileage-a.mileage||b.id.localeCompare(a.id));
   const last=completions[0]; let dueDate=plan.dueDate,dueMileage=plan.dueMileage;
   if(last) { dueDate=plan.intervalMonths ? addMonths(last.date,plan.intervalMonths) : ''; dueMileage=plan.intervalKm ? last.mileage+plan.intervalKm : null; }
@@ -125,6 +141,9 @@ function reminder(plan, records, mileage, asOf=today()) {
   // Rank date and mileage conditions by the share of their lead still left, so a nearly due mileage plan is not buried.
   const share=(left,lead)=>left===null?1e9:left/Math.max(lead,1), urgency=Math.min(share(days,plan.leadDays),share(km,plan.leadKm));
   const daysText=days===null?'':days>0?`还剩 ${days} 天`:days===0?'今天到期':`已超 ${-days} 天`, kmText=km===null?'':km>0?`还剩 ${km} km`:km===0?'已到达':`已超 ${-km} km`;
-  return Object.assign({},plan,{dueDate,dueMileage,status,rank,urgency,days,km,daysText,kmText,stale,lastDate:last?last.date:''});
+  // The remaining distance is projected from the latest reading at the average daily distance, and always labelled as an estimate.
+  const reach=km!==null&&km>0&&dailyKm>0 ? addDays(mileage.date,Math.ceil(km/dailyKm)) : '';
+  const predictText=!reach ? '' : reach>=asOf ? `预计 ${reach} 前后到达，按日均 ${dailyKm} km 估算` : `按日均 ${dailyKm} km 推算可能已到达，请更新里程`;
+  return Object.assign({},plan,{dueDate,dueMileage,status,rank,urgency,days,km,daysText,kmText,predictText,stale,lastDate:last?last.date:''});
 }
-module.exports={TYPES,KINDS,PLAN_KINDS,dateOf,today,assert,validDate,integer,fixed,money,typeOf,allowedKinds,currentMileage,validateTimeline,normalizeVehicle,normalizeRecord,recordInput,recordWarnings,energyIntervals,statistics,planPresets,normalizePlan,daysBetween,reminder,addMonths};
+module.exports={TYPES,KINDS,PLAN_KINDS,OTHER_CATEGORIES,dateOf,today,assert,validDate,integer,fixed,money,typeOf,allowedKinds,currentMileage,validateTimeline,normalizeVehicle,normalizeRecord,recordInput,recordWarnings,energyIntervals,statistics,monthlyTrend,mileageStats,planPresets,normalizePlan,daysBetween,reminder,addMonths,addDays};

@@ -1,11 +1,13 @@
 const D=require('./domain');
 const {getStore}=require('./store');
-function recordView(r){return Object.assign({},r,{title:D.KINDS[r.kind],amount:D.money(r.cents),quantity:r.quantity100?(r.quantity100/100).toFixed(2):'',unit:r.kind==='fuel'?'L':'kWh',symbol:{fuel:'油',charge:'电',service:'养',other:'账'}[r.kind]});}
+// `rates` (from intervalRates) adds the consumption of the interval a record closes; unit price comes from the record itself.
+function recordView(r,rates){const unit=r.kind==='fuel'?'L':'kWh',price=r.quantity100&&r.cents?`¥${(r.cents/r.quantity100).toFixed(2)}/${unit}`:'';return Object.assign({},r,{title:r.kind==='other'&&r.category&&r.category!=='其他'?r.category:D.KINDS[r.kind],amount:D.money(r.cents),quantity:r.quantity100?(r.quantity100/100).toFixed(2):'',unit,symbol:{fuel:'油',charge:'电',service:'养',other:'账'}[r.kind],detail:[price,rates&&rates[r.id]].filter(Boolean).join(' · ')});}
+function intervalRates(records){const rates={};['fuel','charge'].forEach(kind=>D.energyIntervals(records,kind).intervals.forEach(i=>{rates[i.toId]=kind==='fuel'?`油耗 ${i.rate} L/100km`:`电耗 ${i.rate} kWh/100km`;}));return rates;}
 function snapshot(){
   const s=getStore().read(),v=s.vehicles.find(x=>x.id===s.currentId)||s.vehicles.find(x=>!x.archived)||s.vehicles[0];
   const records=v?s.records.filter(r=>r.vehicleId===v.id).sort((a,b)=>b.date.localeCompare(a.date)||b.mileage-a.mileage||b.id.localeCompare(a.id)):[];
-  const mileage=v?D.currentMileage(v,records):null;
-  const plans=v?s.plans.filter(p=>p.vehicleId===v.id).map(p=>D.reminder(p,records,mileage)).sort((a,b)=>a.rank-b.rank||a.urgency-b.urgency):[];
+  const mileage=v?D.currentMileage(v,records):null,daily=v?D.mileageStats(v,records).dailyKm:0;
+  const plans=v?s.plans.filter(p=>p.vehicleId===v.id).map(p=>D.reminder(p,records,mileage,D.today(),daily)).sort((a,b)=>a.rank-b.rank||a.urgency-b.urgency):[];
   return {s,v,records,mileage,plans};
 }
 function base(){const x=snapshot();return Object.assign(x,{data:{vehicles:x.s.vehicles.map(v=>({id:v.id,name:v.name+(v.archived?'（归档）':'')})),vehicleIndex:x.v?x.s.vehicles.findIndex(v=>v.id===x.v.id):0,vehicle:x.v?Object.assign({},x.v,{typeName:D.typeOf(x.v).name}):null,mileage:x.mileage,today:D.today(),error:''}});}
@@ -28,4 +30,4 @@ const common={
   toggle(e){this.setData({['form.'+e.currentTarget.dataset.field]:e.detail.value,error:''});},
   cancel(){back();}
 };
-module.exports={D,getStore,recordView,snapshot,base,guard,back,saved,confirm,common};
+module.exports={D,getStore,recordView,intervalRates,snapshot,base,guard,back,saved,confirm,common};
