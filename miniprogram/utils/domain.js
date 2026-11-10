@@ -9,11 +9,16 @@ const PLAN_KINDS = ['service', 'other'];
 const OTHER_CATEGORIES = ['停车', '通行', '洗车', '保险', '年检', '维修', '罚款', '其他'];
 function dateOf(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function today() { return dateOf(new Date()); }
-function assert(ok, message) { if (!ok) throw new Error(message); }
+// Errors raised here are written for the user; any other error is a bug and is shown as a generic message.
+function fail(message) { const e = new Error(message); e.user = true; throw e; }
+function assert(ok, message) { if (!ok) fail(message); }
 function validDate(s) { if (!/^\d{4}-\d{2}-\d{2}$/.test(s || '')) return false; const d = new Date(s+'T00:00:00Z'); return Number.isFinite(d.getTime()) && d.toISOString().slice(0,10) === s; }
 function integer(value, label, max = 9999999) { assert(String(value).trim() !== '' && /^\d+$/.test(String(value)), `${label}请输入非负整数`); const n = Number(value); assert(Number.isSafeInteger(n) && n <= max, `${label}超出范围`); return n; }
-function fixed(value, label, positive = false) { assert(/^\d+(\.\d{1,2})?$/.test(String(value)), `${label}请输入最多两位小数的数字`); const n = Math.round(Number(value)*100); assert(Number.isSafeInteger(n) && n <= 999999999 && (positive ? n > 0 : n >= 0), `${label}超出范围`); return n; }
+// Accepts what a decimal keyboard produces mid-typing too, such as "12." or ".5".
+function fixed(value, label, positive = false) { const s = String(value).trim(); assert(/^(\d+(\.\d{0,2})?|\.\d{1,2})$/.test(s), `${label}请输入最多两位小数的数字`); const n = Math.round(Number(s)*100); assert(Number.isSafeInteger(n) && n <= 999999999 && (positive ? n > 0 : n >= 0), `${label}超出范围`); return n; }
 function money(cents) { return (cents/100).toFixed(2); }
+// For display only; `money` stays plain because it also fills form inputs.
+function yuan(cents) { const [whole, part] = money(cents).split('.'); return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + part; }
 function typeOf(v) { return TYPES.find(t => t.id === v.type); }
 function allowedKinds(v) { const t = typeOf(v); return [ ...(t.fuel ? ['fuel'] : []), ...(t.charge ? ['charge'] : []), 'service', 'other' ]; }
 function currentMileage(v, records) { return records.filter(r=>r.vehicleId===v.id && r.mileage!=null).reduce((a,r)=> r.date > a.date || (r.date === a.date && r.mileage > a.mileage) ? { date:r.date, mileage:r.mileage } : a, {date:v.baseDate,mileage:v.baseMileage}); }
@@ -122,28 +127,31 @@ function normalizePlan(input, vehicleId) {
   const name=String(input.name||'').trim(); assert(name && name.length<=40,'项目名称必填，最多 40 字');
   assert(!input.dueDate||validDate(input.dueDate),'到期日期无效');
   const optional=(val,label)=> val===''||val==null ? null : integer(val,label);
-  const p={id:input.id,vehicleId,name,dueDate:input.dueDate||'',dueMileage:optional(input.dueMileage,'到期里程'),intervalMonths:optional(input.intervalMonths,'重复月数')||0,intervalKm:optional(input.intervalKm,'重复公里数')||0,leadDays:integer(input.leadDays==null?30:input.leadDays,'提前天数',365),leadKm:integer(input.leadKm==null?500:input.leadKm,'提前公里数')};
+  const p={id:input.id,vehicleId,name,dueDate:input.dueDate||'',dueMileage:optional(input.dueMileage,'到期里程'),intervalMonths:optional(input.intervalMonths,'重复月数')||0,intervalKm:optional(input.intervalKm,'重复公里数')||0,leadDays:integer(input.leadDays===''||input.leadDays==null?30:input.leadDays,'提前天数',365),leadKm:integer(input.leadKm===''||input.leadKm==null?500:input.leadKm,'提前公里数')};
   assert(p.dueDate || p.dueMileage!==null,'请至少设置到期日期或到期里程');
   assert(p.intervalMonths<=120,'重复周期不能超过 120 个月'); return p;
 }
 function daysBetween(a,b){return Math.round((Date.parse(a+'T00:00:00Z')-Date.parse(b+'T00:00:00Z'))/86400000);}
+// Logic compares `state`; pages show `status` and sort by `rank`.
+const PLAN_STATES = { overdue: ['已到期', 0], soon: ['即将到期', 1], stale: ['里程待更新', 2], ok: ['正常', 3], done: ['已完成', 4] };
 function reminder(plan, records, mileage, asOf=today(), dailyKm=0) {
   const completions=records.filter(r=>r.planId===plan.id && r.complete).sort((a,b)=>b.date.localeCompare(a.date)||b.mileage-a.mileage||b.id.localeCompare(a.id));
   const last=completions[0]; let dueDate=plan.dueDate,dueMileage=plan.dueMileage;
   if(last) { dueDate=plan.intervalMonths ? addMonths(last.date,plan.intervalMonths) : ''; dueMileage=plan.intervalKm ? last.mileage+plan.intervalKm : null; }
   const days=dueDate?daysBetween(dueDate,asOf):null, km=dueMileage==null?null:dueMileage-mileage.mileage;
-  let status='正常',rank=3;
-  if(last && !dueDate && dueMileage==null){status='已完成';rank=4;}
-  else if((days!==null&&days<=0)||(km!==null&&km<=0)){status='已到期';rank=0;}
-  else if((days!==null&&days<=plan.leadDays)||(km!==null&&km<=plan.leadKm)){status='即将到期';rank=1;}
+  let state='ok';
+  if(last && !dueDate && dueMileage==null) state='done';
+  else if((days!==null&&days<=0)||(km!==null&&km<=0)) state='overdue';
+  else if((days!==null&&days<=plan.leadDays)||(km!==null&&km<=plan.leadKm)) state='soon';
   const stale=dueMileage!==null&&daysBetween(asOf,mileage.date)>30;
-  if(stale && rank===3){status='里程待更新';rank=2;}
+  if(stale && state==='ok') state='stale';
+  const [status,rank]=PLAN_STATES[state];
   // Rank date and mileage conditions by the share of their lead still left, so a nearly due mileage plan is not buried.
   const share=(left,lead)=>left===null?1e9:left/Math.max(lead,1), urgency=Math.min(share(days,plan.leadDays),share(km,plan.leadKm));
   const daysText=days===null?'':days>0?`还剩 ${days} 天`:days===0?'今天到期':`已超 ${-days} 天`, kmText=km===null?'':km>0?`还剩 ${km} km`:km===0?'已到达':`已超 ${-km} km`;
   // The remaining distance is projected from the latest reading at the average daily distance, and always labelled as an estimate.
   const reach=km!==null&&km>0&&dailyKm>0 ? addDays(mileage.date,Math.ceil(km/dailyKm)) : '';
   const predictText=!reach ? '' : reach>=asOf ? `预计 ${reach} 前后到达，按日均 ${dailyKm} km 估算` : `按日均 ${dailyKm} km 推算可能已到达，请更新里程`;
-  return Object.assign({},plan,{dueDate,dueMileage,status,rank,urgency,days,km,daysText,kmText,predictText,stale,lastDate:last?last.date:''});
+  return Object.assign({},plan,{dueDate,dueMileage,state,status,rank,urgency,days,km,daysText,kmText,predictText,stale,lastDate:last?last.date:''});
 }
-module.exports={TYPES,KINDS,PLAN_KINDS,OTHER_CATEGORIES,dateOf,today,assert,validDate,integer,fixed,money,typeOf,allowedKinds,currentMileage,validateTimeline,normalizeVehicle,normalizeRecord,recordInput,recordWarnings,energyIntervals,statistics,monthlyTrend,mileageStats,planPresets,normalizePlan,daysBetween,reminder,addMonths,addDays};
+module.exports={TYPES,KINDS,PLAN_KINDS,OTHER_CATEGORIES,dateOf,today,fail,assert,validDate,integer,fixed,money,yuan,typeOf,allowedKinds,currentMileage,validateTimeline,normalizeVehicle,normalizeRecord,recordInput,recordWarnings,energyIntervals,statistics,monthlyTrend,mileageStats,planPresets,normalizePlan,daysBetween,reminder,addMonths,addDays};

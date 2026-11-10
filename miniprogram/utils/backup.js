@@ -14,7 +14,7 @@ function backupState(){try{return wx.getStorageSync(KEY)||null;}catch(e){return 
 function markBackedUp(count,exportedAt){const at=Date.parse(exportedAt);try{wx.setStorageSync(KEY,{at:isNaN(at)?D.today():D.dateOf(new Date(at)),count});}catch(e){}}
 // Suggests a backup only once there is something worth losing: 10+ records never backed up, or changes since a backup 30+ days old.
 function backupNudge(count){const b=backupState();if(!b)return count>=10?`已有 ${count} 条记录还没有备份过`:'';const days=D.daysBetween(D.today(),b.at);return days>=30&&count!==b.count?`距上次备份已 ${days} 天`:'';}
-function readBackup(path){try{return JSON.parse(wx.getFileSystemManager().readFileSync(path,'utf8'));}catch(e){throw new Error('无法读取该文件，请选择车小记导出的 .json 备份文件');}}
+function readBackup(path){try{return JSON.parse(wx.getFileSystemManager().readFileSync(path,'utf8'));}catch(e){D.fail('无法读取该文件，请选择车小记导出的 .json 备份文件');}}
 // Validates before asking, so the confirmation only appears for a backup that can actually be restored.
 function describeRestore(raw){
   const data=normalizeBackup(raw),at=Date.parse(raw.exportedAt);let local='';

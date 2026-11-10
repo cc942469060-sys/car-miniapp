@@ -134,6 +134,27 @@ test('日均里程需要 14 天以上的读数；里程计划按日均推算预�
  const p=D.normalizePlan({id:'p',name:'保养',dueMileage:7000},'v'),now={mileage:6400,date:'2025-06-30'};
  assert.equal(D.reminder(p,[],now,'2025-07-01',30).predictText,'预计 2025-07-20 前后到达，按日均 30 km 估算');assert.match(D.reminder(p,[],now,'2025-08-01',30).predictText,/可能已到达/);assert.equal(D.reminder(p,[],now,'2025-07-01').predictText,'');
 });
+test('金额接受键盘输入中的「12.」「.5」与首尾空格；千分位只用于显示；清空提前量用默认值',()=>{
+ assert.equal(D.fixed('12.','金额'),1200);assert.equal(D.fixed('.5','金额'),50);assert.equal(D.fixed(' 300 ','金额'),30000);for(const bad of ['','.','1.001','-1','1,000'])assert.throws(()=>D.fixed(bad,'金额'),/金额/);
+ assert.equal(D.yuan(123456789),'1,234,567.89');assert.equal(D.yuan(99999),'999.99');assert.equal(D.yuan(0),'0.00');assert.equal(D.money(123456789),'1234567.89');
+ const p=D.normalizePlan({id:'p',name:'保养',dueMileage:'5000',leadDays:'',leadKm:''},'v');assert.equal(p.leadDays,30);assert.equal(p.leadKm,500);
+});
+test('计划状态使用代码值，页面文字与排序不变',()=>{
+ const p=D.normalizePlan({id:'p',name:'保养',dueDate:'2025-03-01',dueMileage:2000,leadDays:10,leadKm:100},'v'),state=(m,asOf)=>{const r=D.reminder(p,[],m,asOf);return r.state+'/'+r.status+'/'+r.rank;};
+ assert.equal(state({mileage:2100,date:'2025-02-01'},'2025-02-01'),'overdue/已到期/0');assert.equal(state({mileage:1950,date:'2025-02-01'},'2025-02-01'),'soon/即将到期/1');assert.equal(state({mileage:1000,date:'2024-12-01'},'2025-02-01'),'stale/里程待更新/2');assert.equal(state({mileage:1000,date:'2025-02-01'},'2025-02-01'),'ok/正常/3');
+ const once=D.normalizePlan({id:'o',name:'检查',dueDate:'2025-02-01'},'v');assert.equal(D.reminder(once,[{id:'r',planId:'o',complete:true,date:'2025-01-20',mileage:1000}],{mileage:1000,date:'2025-01-20'},'2025-01-21').state,'done');
+});
+test('面向用户的错误带标记；账本过大导致写入失败时提示存储上限',()=>{
+ assert.throws(()=>D.assert(false,'车辆不存在'),e=>e.user===true&&e.message==='车辆不存在');
+ const records=Array.from({length:3000},(_,i)=>({id:'r'+i,vehicleId:'v',kind:'other',date:'2025-01-02',mileage:null,cents:100,note:'x'.repeat(120),planId:'',complete:false,category:'其他'}));
+ const store=createStore({get:()=>({version:1,vehicles:[{id:'v',name:'车',type:'fuel',model:'',baseDate:'2025-01-01',baseMileage:1000,archived:false}],records,plans:[],currentId:'v'}),set:()=>{throw Error('quota');}});
+ assert.throws(()=>store.select('v'),/保存失败，本机数据未更改：账本数据较大，可能已达到微信单项存储上限/);
+});
+test('删除的记录可以撤销并保留原编号；重复撤销或关联计划已删除时给出提示',()=>{
+ const {store}=fixture(),id=car(store);const pid=store.savePlan({vehicleId:id,name:'保养',dueMileage:'5000'}),rid=record(store,id,{kind:'service',planId:pid,complete:true,amount:'300'});
+ const removed=store.deleteRecord(rid);assert.equal(store.read().records.length,0);store.undoDelete(removed);assert.equal(store.read().records[0].id,rid);assert.throws(()=>store.undoDelete(removed),/已经恢复/);
+ store.deleteRecord(rid);store.deletePlan(pid);assert.throws(()=>store.undoDelete(removed),/关联的计划已删除/);
+});
 test('不兼容缓存必须保留，不能静默重置',()=>{
  let writes=0;const store=createStore({get:()=>({version:99}),set:()=>writes++});assert.throws(()=>store.read(),/不兼容/);assert.throws(()=>car(store),/不兼容/);assert.equal(writes,0);
 });

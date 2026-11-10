@@ -3,10 +3,10 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path');
 const U=require('../miniprogram/utils/ui');
 // `raw` is the app data key; other keys (such as the last-backup marker) live in `side`. `answer` is what the next modal returns.
-let raw='',side={},navigation=[],toasts=[],modals=[],files={},shared=[],answer={confirm:true};
+let raw='',side={},navigation=[],toasts=[],modals=[],files={},shared=[],scrolls=[],answer={confirm:true};
 beforeEach(()=>{
- raw='';side={};navigation=[];toasts=[];modals=[];files={};shared=[];answer={confirm:true};
- global.wx={getStorageSync:key=>key==='car-miniapp:v1'?raw:(side[key]||''),setStorageSync:(key,v)=>{const copy=JSON.parse(JSON.stringify(v));if(key==='car-miniapp:v1')raw=copy;else side[key]=copy;},setNavigationBarTitle:()=>{},showToast:o=>toasts.push(o.title),navigateBack:()=>navigation.push('back'),navigateTo:o=>navigation.push(o.url),switchTab:o=>navigation.push(o.url),showModal:o=>{modals.push(o.content||o.placeholderText);o.success(answer);},
+ raw='';side={};navigation=[];toasts=[];modals=[];files={};shared=[];scrolls=[];answer={confirm:true};
+ global.wx={pageScrollTo:o=>scrolls.push(o.selector),getStorageSync:key=>key==='car-miniapp:v1'?raw:(side[key]||''),setStorageSync:(key,v)=>{const copy=JSON.parse(JSON.stringify(v));if(key==='car-miniapp:v1')raw=copy;else side[key]=copy;},setNavigationBarTitle:()=>{},showToast:o=>toasts.push(o.title),navigateBack:()=>navigation.push('back'),navigateTo:o=>navigation.push(o.url),switchTab:o=>navigation.push(o.url),showModal:o=>{modals.push(o.content||o.placeholderText);o.success(answer);},
   env:{USER_DATA_PATH:'wxfile://usr'},getFileSystemManager:()=>({writeFileSync:(p,d)=>{files[p]=d;},readFileSync:p=>{if(!(p in files))throw Error('no such file');return files[p];}}),shareFileMessage:o=>{shared.push(o);o.success();},chooseMessageFile:o=>o.fail({errMsg:'chooseMessageFile:fail cancel'})};
 });
 // Registering a page runs its module once, like an app launch; opening creates an instance from that registration.
@@ -48,14 +48,14 @@ test('新记录不预填里程而提示最近读数；日期在打开页面时�
 });
 test('账本合计随类型筛选变化；删除记录和计划提示已删除',()=>{
  const id=createCar('fuel'),today=U.D.today();U.getStore().saveRecord({vehicleId:id,kind:'fuel',date:today,mileage:'1200',amount:'300',quantity:'40',full:true});U.getStore().saveRecord({vehicleId:id,kind:'service',date:today,mileage:'1200',amount:'800'});
- const ledger=loadPage('ledger');assert.equal(ledger.data.count,2);assert.equal(ledger.data.amount,'1100.00');ledger.filterChange({currentTarget:{dataset:{id:'fuel'}}});assert.equal(ledger.data.records.length,1);assert.equal(ledger.data.count,1);assert.equal(ledger.data.amount,'300.00');
+ const ledger=loadPage('ledger');assert.equal(ledger.data.count,2);assert.equal(ledger.data.amount,'1,100.00');ledger.filterChange({currentTarget:{dataset:{id:'fuel'}}});assert.equal(ledger.data.records.length,1);assert.equal(ledger.data.count,1);assert.equal(ledger.data.amount,'300.00');
  toasts=[];loadPage('entry',{id:raw.records[0].id}).remove();const pid=U.getStore().savePlan({vehicleId:id,name:'保养',dueMileage:'5000'});loadPage('plan',{id:pid}).remove();assert.deepEqual(toasts,['已删除','已删除']);
 });
 test('首页按紧急程度显示前两条计划；完成车险计划可记为其他费用并进入养护历史',()=>{
  const today=U.D.today(),later=n=>{const d=new Date(today+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);},store=U.getStore();
  const id=store.saveVehicle({name:'车',type:'fuel',baseDate:today,baseMileage:'29990'});store.savePlan({vehicleId:id,name:'机油机滤',dueMileage:'30000'});const pid=store.savePlan({vehicleId:id,name:'车险续期',dueDate:later(20),intervalMonths:'12'});store.savePlan({vehicleId:id,name:'年检',dueDate:later(25)});
  const home=loadPage('home');assert.deepEqual(home.data.plans.map(p=>p.name),['机油机滤','车险续期']);assert.equal(home.data.plans[0].kmText,'还剩 10 km');
- const entry=loadPage('entry',{vehicleId:id,planId:pid});assert.deepEqual(entry.data.kinds.map(k=>k.id),['service','other']);entry.kindChange({detail:{value:1}});entry.setData({'form.mileage':'29990','form.amount':'3800'});entry.save();
+ const entry=loadPage('entry',{vehicleId:id,planId:pid});assert.deepEqual(entry.data.kinds.map(k=>k.id),['service','other']);entry.pickKind({currentTarget:{dataset:{index:1}}});entry.setData({'form.mileage':'29990','form.amount':'3800'});entry.save();
  assert.equal(raw.records[0].kind,'other');assert.equal(raw.records[0].complete,true);const care=loadPage('care');assert.equal(care.data.records.length,1);assert.equal(care.data.plans.find(p=>p.name==='车险续期').lastDate,today);
 });
 test('车库页导出备份并转发；恢复前校验并确认，替换数据后刷新页面',()=>{
@@ -111,7 +111,7 @@ test('填写金额和单价自动算出油量；手动改过油量后不再覆�
 });
 test('其他费用可选类别；完成车险计划默认归为保险；账本标题显示类别',()=>{
  const id=createCar('fuel'),pid=U.getStore().savePlan({vehicleId:id,name:'车险续期',dueDate:'2025-02-01'});assert.equal(loadPage('entry',{vehicleId:id,planId:pid}).data.form.category,'保险');
- const entry=loadPage('entry',{vehicleId:id});entry.kindChange({detail:{value:entry.data.kinds.findIndex(k=>k.id==='other')}});entry.pickCategory({currentTarget:{dataset:{value:'停车'}}});entry.setData({'form.date':'2025-01-02','form.amount':'15'});entry.save();
+ const entry=loadPage('entry',{vehicleId:id});entry.pickKind({currentTarget:{dataset:{index:entry.data.kinds.findIndex(k=>k.id==='other')}}});entry.pickCategory({currentTarget:{dataset:{value:'停车'}}});entry.setData({'form.date':'2025-01-02','form.amount':'15'});entry.save();
  assert.equal(raw.records[0].category,'停车');const ledger=loadPage('ledger');ledger.monthChange({detail:{value:'2025-01'}});assert.equal(ledger.data.records[0].title,'停车');
 });
 test('统计页：年度与累计、近 12 个月、日均里程与能源成本；多车时可看全部车辆合计；计划显示预计到达',()=>{
@@ -122,6 +122,24 @@ test('统计页：年度与累计、近 12 个月、日均里程与能源成本�
  const ev=store.saveVehicle({name:'电车',type:'ev',baseDate:'2025-01-01',baseMileage:'10'});store.saveRecord({vehicleId:ev,kind:'charge',date:'2025-01-05',mileage:'200',amount:'30',quantity:'40'});store.select(id);
  stats.onShow();assert.equal(stats.data.multi,true);stats.scopeChange({currentTarget:{dataset:{scope:'all'}}});assert.equal(stats.data.amount,'600.00');assert.equal(stats.data.energy.length,0);
  store.savePlan({vehicleId:id,name:'保养',dueMileage:'2000'});assert.match(loadPage('home').data.plans[0].predictText,/按日均 20.7 km 推算可能已到达/);
+});
+test('表单错误标在对应字段并滚动过去，修改后清除；程序错误只显示通用提示',()=>{
+ const id=createCar('fuel'),entry=loadPage('entry',{vehicleId:id});entry.setData({'form.date':'2025-01-02','form.mileage':'1200','form.amount':'abc','form.quantity':'40'});entry.save();
+ assert.equal(entry.data.errorField,'amount');assert.match(entry.data.error,/金额/);assert.deepEqual(scrolls,['#f-amount']);
+ entry.input({currentTarget:{dataset:{field:'amount'}},detail:{value:'300'}});assert.equal(entry.data.errorField,'');
+ entry.setData({'form.mileage':'900'});entry.save();assert.equal(entry.data.errorField,'mileage');assert.match(entry.data.error,/累计里程/);assert.equal(entry.data.saving,false);
+ const home=loadPage('home'),log=console.error;console.error=()=>{};try{U.guard(home,()=>{throw new TypeError('boom');});}finally{console.error=log;}assert.match(home.data.error,/出了点问题/);assert.equal(home.data.errorField,'');
+});
+test('删除记录后可在列表页撤销；已完成计划折叠；新车显示开始使用清单；可转发小程序',()=>{
+ const id=createCar('fuel'),store=U.getStore();let home=loadPage('home');assert.deepEqual(home.data.guide,{record:false,plan:false});assert.equal(home.onShareAppMessage().path,'/pages/home/index');
+ store.saveRecord({vehicleId:id,kind:'fuel',date:'2025-01-02',mileage:'1100',amount:'300',quantity:'40',full:true});const pid=store.savePlan({vehicleId:id,name:'检查',dueDate:'2025-02-01'});
+ loadPage('entry',{id:raw.records[0].id}).remove();const ledger=loadPage('ledger');assert.match(ledger.data.undo,/已删除「加油 ¥300\.00」/);ledger.undoDelete();assert.equal(raw.records.length,1);assert.equal(ledger.data.undo,'');assert.equal(loadPage('home').data.guide,null);
+ const entry=loadPage('entry',{vehicleId:id,planId:pid});entry.setData({'form.date':'2025-01-03','form.mileage':'1150','form.amount':'0'});entry.save();
+ const care=loadPage('care');assert.equal(care.data.plans.length,0);assert.equal(care.data.done.length,1);assert.equal(care.data.showDone,false);care.toggleDone();assert.equal(care.data.showDone,true);
+});
+test('编辑不重复的计划时周期显示为空；清空提前天数按默认值保存',()=>{
+ const id=createCar(),pid=U.getStore().savePlan({vehicleId:id,name:'车险',dueDate:'2026-12-31'}),plan=loadPage('plan',{id:pid});
+ assert.equal(plan.data.form.intervalMonths,'');assert.equal(plan.data.form.intervalKm,'');plan.setData({'form.leadDays':''});plan.save();assert.equal(raw.plans[0].leadDays,30);
 });
 test('所有页面含已绑定事件方法，导入模板可解析，空数据页面不报错',()=>{
  function sources(file){const text=fs.readFileSync(file,'utf8');let result=text;for(const m of text.matchAll(/<import\s+src="([^"]+)"/g))result+='\n'+sources(path.resolve(path.dirname(file),m[1]));return result;}

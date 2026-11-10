@@ -13,5 +13,9 @@ for(const file of files){const source=fs.readFileSync(file,'utf8');if(file.endsW
  }checked++;}
 const app=JSON.parse(fs.readFileSync(path.join(root,'app.json'),'utf8'));
 for(const page of app.pages)for(const ext of ['.js','.json','.wxml','.wxss'])if(!fs.existsSync(path.join(root,page+ext)))throw Error('Missing page file: '+page+ext);
-for(const tab of app.tabBar.list)if(!app.pages.includes(tab.pagePath))throw Error('Unregistered tab: '+tab.pagePath);
-console.log(`Checked ${checked} files; ${app.pages.length} pages and all tab routes registered. JS syntax, JSON and WXML expression entity checks passed. This does not replace WeChat compilation.`);
+for(const tab of app.tabBar.list){
+ if(!app.pages.includes(tab.pagePath))throw Error('Unregistered tab: '+tab.pagePath);
+ // WeChat requires local tab icons of at most 40KB.
+ for(const key of ['iconPath','selectedIconPath']){const icon=tab[key]&&path.join(root,tab[key]);if(icon&&!(fs.existsSync(icon)&&fs.statSync(icon).size<=40*1024))throw Error('Missing or oversized tab icon: '+tab[key]);}
+}
+console.log(`Checked ${checked} files; ${app.pages.length} pages and all tab routes and icons registered. JS syntax, JSON and WXML expression entity checks passed. This does not replace WeChat compilation.`);

@@ -4,10 +4,10 @@
   "tabBar": {
     "color": "#78716c", "selectedColor": "#065f46", "backgroundColor": "#ffffff", "borderStyle": "white",
     "list": [
-      { "pagePath": "pages/home/index", "text": "概览" },
-      { "pagePath": "pages/ledger/index", "text": "账本" },
-      { "pagePath": "pages/care/index", "text": "养护" },
-      { "pagePath": "pages/garage/index", "text": "车辆" }
+      { "pagePath": "pages/home/index", "text": "概览", "iconPath": "assets/tabbar/home.png", "selectedIconPath": "assets/tabbar/home-active.png" },
+      { "pagePath": "pages/ledger/index", "text": "账本", "iconPath": "assets/tabbar/ledger.png", "selectedIconPath": "assets/tabbar/ledger-active.png" },
+      { "pagePath": "pages/care/index", "text": "养护", "iconPath": "assets/tabbar/care.png", "selectedIconPath": "assets/tabbar/care-active.png" },
+      { "pagePath": "pages/garage/index", "text": "车辆", "iconPath": "assets/tabbar/garage.png", "selectedIconPath": "assets/tabbar/garage-active.png" }
     ]
   },
   "style": "v2",
