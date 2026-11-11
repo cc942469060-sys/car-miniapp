@@ -22,8 +22,9 @@ for (const file of files) {
         );
       }
     }
-    for (const match of source.matchAll(/(?:src="([^"]+)"|bind(?:tap|change|input)="([^"]+)")/g)) {
-      if (match[1] && !fs.existsSync(path.resolve(path.dirname(file), match[1])))
+    // Bound event handlers are checked by tests/pages.test.js, which loads every page.
+    for (const match of source.matchAll(/<(?:import|include)\s+src="([^"]+)"/g)) {
+      if (!fs.existsSync(path.resolve(path.dirname(file), match[1])))
         throw Error('Missing import: ' + file + ' ' + match[1]);
     }
   }
