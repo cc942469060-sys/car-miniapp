@@ -43,5 +43,24 @@ Page(
       if (id) U.saved();
       else this.setData({ saving: false });
     },
+    // Deleting a vehicle also deletes its history, so the confirmation says what goes and suggests a backup first.
+    remove() {
+      U.guard(this, () => {
+        const s = U.getStore().read(),
+          id = this.data.form.id,
+          v = s.vehicles.find(x => x.id === id),
+          records = s.records.filter(r => r.vehicleId === id).length,
+          plans = s.plans.filter(p => p.vehicleId === id).length;
+        U.D.assert(v, '车辆不存在');
+        U.confirm(
+          `删除「${v.name}」及其 ${records} 条记录、${plans} 个养护计划？删除后无法恢复，建议先在「车辆」页导出备份。`,
+          () =>
+            U.guard(this, () => {
+              U.getStore().deleteVehicle(id);
+              U.saved('已删除');
+            })
+        );
+      });
+    },
   })
 );

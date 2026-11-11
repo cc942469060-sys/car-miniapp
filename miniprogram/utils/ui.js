@@ -45,8 +45,10 @@ let lastDeleted = null;
 function rememberDeleted(record) {
   lastDeleted = { record, at: Date.now() };
 }
-function undoText() {
+// The offer lapses after a minute, or when the record's vehicle has been deleted since.
+function undoText(s) {
   if (!lastDeleted || Date.now() - lastDeleted.at > 60000) return '';
+  if (!s.vehicles.some(v => v.id === lastDeleted.record.vehicleId)) return '';
   const r = recordView(lastDeleted.record);
   return `已删除「${r.title} ¥${r.amount}」`;
 }
@@ -59,7 +61,7 @@ function base() {
       vehicle: x.v ? Object.assign({}, x.v, { typeName: D.typeOf(x.v).name }) : null,
       mileage: x.mileage,
       today: D.today(),
-      undo: undoText(),
+      undo: undoText(x.s),
       error: '',
       errorField: '',
     },
