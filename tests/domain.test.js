@@ -574,6 +574,82 @@ test('删除的记录可以撤销并保留原编号；重复撤销或关联计�
   store.deletePlan(pid);
   assert.throws(() => store.undoDelete(removed), /关联的计划已删除/);
 });
+test('删除车辆会一并删除它的记录与计划，当前车辆切到其余车辆', () => {
+  const { store } = fixture(),
+    a = car(store),
+    b = car(store, 'ev');
+  record(store, a);
+  store.savePlan({ vehicleId: a, name: '保养', dueMileage: '5000' });
+  record(store, b, { kind: 'charge', amount: '20', quantity: '30' });
+  store.select(a);
+  assert.deepEqual(store.deleteVehicle(a), { records: 1, plans: 1 });
+  const s = store.read();
+  assert.deepEqual(
+    s.vehicles.map(v => v.id),
+    [b]
+  );
+  assert.deepEqual(
+    s.records.map(r => r.vehicleId),
+    [b]
+  );
+  assert.equal(s.plans.length, 0);
+  assert.equal(s.currentId, b);
+  store.deleteVehicle(b);
+  assert.equal(store.read().currentId, '');
+  assert.throws(() => store.deleteVehicle(b), /车辆不存在/);
+});
+test('CSV 导出带 BOM 与表头，按日期排序，转义逗号和引号，并防止公式注入', () => {
+  const { recordsCsv } = require('../miniprogram/utils/csv');
+  const csv = recordsCsv({
+    vehicles: [{ id: 'v', name: '通勤,车' }],
+    plans: [{ id: 'p', name: '车险续期' }],
+    records: [
+      {
+        id: 'b',
+        vehicleId: 'v',
+        kind: 'other',
+        category: '保险',
+        date: '2025-02-01',
+        mileage: 1500,
+        cents: 380000,
+        note: '=1+1',
+        planId: 'p',
+      },
+      {
+        id: 'a',
+        vehicleId: 'v',
+        kind: 'fuel',
+        date: '2025-01-02',
+        mileage: 1100,
+        cents: 30000,
+        quantity100: 4000,
+        full: true,
+        note: '加"满"',
+      },
+      {
+        id: 'c',
+        vehicleId: 'v',
+        kind: 'charge',
+        date: '2025-01-05',
+        mileage: 1200,
+        cents: 2000,
+        quantity100: 3000,
+        socAfter: 80,
+        note: '',
+      },
+    ],
+  });
+  const lines = csv.slice(1).split('\r\n');
+  assert.equal(csv.charCodeAt(0), 0xfeff);
+  assert.equal(
+    lines[0],
+    '车辆,日期,类型,类别,金额(元),累计里程(km),补能量,单位,单价(元),本次加满,充电后电量(%),关联计划,备注'
+  );
+  assert.equal(lines[1], '"通勤,车",2025-01-02,加油,,300.00,1100,40.00,L,7.50,是,,,"加""满"""');
+  assert.equal(lines[2], '"通勤,车",2025-01-05,充电,,20.00,1200,30.00,kWh,0.67,,80,,');
+  assert.equal(lines[3], `"通勤,车",2025-02-01,其他费用,保险,3800.00,1500,,,,,,车险续期,'=1+1`);
+  assert.deepEqual(lines.slice(4), ['']);
+});
 test('不兼容缓存必须保留，不能静默重置', () => {
   let writes = 0;
   const store = createStore({ get: () => ({ version: 99 }), set: () => writes++ });

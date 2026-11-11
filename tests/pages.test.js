@@ -618,6 +618,36 @@ test('编辑不重复的计划时周期显示为空；清空提前天数按默�
   plan.save();
   assert.equal(raw.plans[0].leadDays, 30);
 });
+test('车库页导出 CSV 表格并转发；车辆档案页可删除车辆及其数据', () => {
+  const id = createCar('fuel'),
+    store = U.getStore();
+  let garage = loadPage('garage');
+  assert.equal(garage.data.recordCount, 0);
+  garage.exportCsv();
+  assert.match(garage.data.error, /还没有记录可以导出/);
+  store.saveRecord({
+    vehicleId: id,
+    kind: 'fuel',
+    date: '2025-01-02',
+    mileage: '1100',
+    amount: '300',
+    quantity: '40',
+    full: true,
+  });
+  garage = loadPage('garage');
+  assert.equal(garage.data.recordCount, 1);
+  toasts = [];
+  garage.exportCsv();
+  const file = shared.at(-1);
+  assert.match(file.fileName, /^车小记账单-\d{4}-\d{2}-\d{2}\.csv$/);
+  assert.match(files[file.filePath], /我的车,2025-01-02,加油,,300\.00,1100,40\.00,L,7\.50,是/);
+  assert.deepEqual(toasts, ['已导出']);
+  loadPage('vehicle', { id }).remove();
+  assert.match(modals.at(-1), /删除「我的车」及其 1 条记录、0 个养护计划/);
+  assert.equal(raw.vehicles.length, 0);
+  assert.equal(raw.records.length, 0);
+  assert.equal(toasts.at(-1), '已删除');
+});
 test('所有页面含已绑定事件方法，导入模板可解析，空数据页面不报错', () => {
   function sources(file) {
     const text = fs.readFileSync(file, 'utf8');

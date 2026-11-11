@@ -1,5 +1,6 @@
 const D = require('./domain');
 const { getStore, normalizeBackup } = require('./store');
+const { recordsCsv } = require('./csv');
 const KEY = 'car-miniapp:backup';
 // One local file, overwritten on each export; the chat shows the dated file name instead.
 const filePath = () => wx.env.USER_DATA_PATH + '/car-miniapp-backup.json';
@@ -9,6 +10,15 @@ function writeBackup() {
   const data = getStore().exportData();
   wx.getFileSystemManager().writeFileSync(filePath(), JSON.stringify(data), 'utf8');
   return { filePath: filePath(), fileName: '车小记备份-' + D.today() + '.json', count: data.records.length };
+}
+// The spreadsheet travels the same way as the backup: written to a local file, then forwarded to a chat.
+function writeCsv() {
+  D.assert(wx.shareFileMessage, '当前微信版本不支持发送文件，请升级微信后再导出');
+  const s = getStore().read(),
+    path = wx.env.USER_DATA_PATH + '/car-miniapp-records.csv';
+  D.assert(s.records.length, '还没有记录可以导出');
+  wx.getFileSystemManager().writeFileSync(path, recordsCsv(s), 'utf8');
+  return { filePath: path, fileName: '车小记账单-' + D.today() + '.csv' };
 }
 function backupState() {
   try {
@@ -51,4 +61,13 @@ function describeRestore(raw) {
   }
   return `备份导出于 ${isNaN(at) ? '未知时间' : D.dateOf(new Date(at))}，含 ${data.vehicles.length} 辆车、${data.records.length} 条记录、${data.plans.length} 个计划。恢复会替换本机全部数据${local}，且无法撤销。`;
 }
-module.exports = { writeBackup, readBackup, describeRestore, cancelled, backupState, markBackedUp, backupNudge };
+module.exports = {
+  writeBackup,
+  writeCsv,
+  readBackup,
+  describeRestore,
+  cancelled,
+  backupState,
+  markBackedUp,
+  backupNudge,
+};

@@ -16,6 +16,7 @@ Page(
               })
             ),
             backupAt: (B.backupState() || {}).at || '',
+            recordCount: x.s.records.length,
           })
         );
       });
@@ -53,6 +54,20 @@ Page(
           },
           fail: e => {
             if (!B.cancelled(e)) this.setData({ error: '未能发送备份文件，请重试' });
+          },
+        });
+      });
+    },
+    exportCsv() {
+      this.setData({ error: '' });
+      U.guard(this, () => {
+        const file = B.writeCsv();
+        wx.shareFileMessage({
+          filePath: file.filePath,
+          fileName: file.fileName,
+          success: () => wx.showToast({ title: '已导出', icon: 'success' }),
+          fail: e => {
+            if (!B.cancelled(e)) this.setData({ error: '未能发送表格文件，请重试' });
           },
         });
       });

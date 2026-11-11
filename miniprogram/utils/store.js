@@ -144,6 +144,24 @@ function createStore(storage) {
         if (archived && s.currentId === id) s.currentId = (s.vehicles.find(x => !x.archived) || {}).id || id;
       });
     },
+    // Removes a vehicle together with its records and plans; the page confirms first and suggests a backup.
+    deleteVehicle(id) {
+      return change(s => {
+        D.assert(
+          s.vehicles.some(v => v.id === id),
+          '车辆不存在'
+        );
+        const removed = {
+          records: s.records.filter(r => r.vehicleId === id).length,
+          plans: s.plans.filter(p => p.vehicleId === id).length,
+        };
+        s.vehicles = s.vehicles.filter(v => v.id !== id);
+        s.records = s.records.filter(r => r.vehicleId !== id);
+        s.plans = s.plans.filter(p => p.vehicleId !== id);
+        if (s.currentId === id) s.currentId = (s.vehicles.find(v => !v.archived) || s.vehicles[0] || {}).id || '';
+        return removed;
+      });
+    },
     // An odometer reading without an expense becomes the vehicle's manual reading for today.
     updateMileage(id, value) {
       return change(s => {
