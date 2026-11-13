@@ -14,9 +14,12 @@
 ```powershell
 npm test
 npm run check
+npm run format:check
 ```
 
-无需执行 npm install 或构建 npm。
+无需执行 npm install 或构建 npm。`npm run format:check` 首次运行会通过 npx 下载 Prettier 3.9.10。
+
+每次推送到 `main` 或开 PR 时，GitHub Actions 会自动运行以上三项检查（配置见 `.github/workflows/ci.yml`）；任何一项失败，PR 上会显示未通过。
 
 格式化 JS 与 WXSS（配置见 `.prettierrc.json`；首次运行会通过 npx 下载 Prettier 3.9.10，WXML 保持手写格式）：
 
