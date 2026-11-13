@@ -66,12 +66,11 @@ Page(
             category: record.category || '其他',
           });
         else if (plan)
-          form = Object.assign(form, {
-            planId: plan.id,
-            complete: true,
-            note: plan.name,
-            category: /险/.test(plan.name) ? '保险' : /年检|年审/.test(plan.name) ? '年检' : '其他',
-          });
+          form = Object.assign(
+            form,
+            { planId: plan.id, complete: true, note: plan.name },
+            U.D.planRecordDefaults(plan, s.records)
+          );
         this.setData({
           vehicle: v,
           kinds,

@@ -237,6 +237,35 @@ test('其他费用可以完成计划并计入其他费用；补能记录不能�
   assert.equal(st.categories.find(c => c.kind === 'service').cents, 0);
   assert.throws(() => record(store, id, { planId: pid, complete: true }), /保养或其他费用/);
 });
+test('完成计划的新记录默认沿用该计划上次的类型；没有记录时车险、年检记为其他费用', () => {
+  const plan = name => ({ id: 'p', name }),
+    done = (id, date, kind, extra = {}) =>
+      Object.assign({ id, vehicleId: 'v', planId: 'p', complete: true, date, mileage: 1000, kind }, extra),
+    defaults = (name, records = []) => D.planRecordDefaults(plan(name), records);
+  assert.deepEqual(defaults('车险续期'), { kind: 'other', category: '保险' });
+  assert.deepEqual(defaults('交强险'), { kind: 'other', category: '保险' });
+  assert.deepEqual(defaults('年检'), { kind: 'other', category: '年检' });
+  assert.deepEqual(defaults('年审'), { kind: 'other', category: '年检' });
+  assert.deepEqual(defaults('机油机滤'), { kind: 'service', category: '其他' });
+  // The last completion of this plan wins over the name.
+  assert.deepEqual(defaults('机油机滤', [done('a', '2025-01-01', 'other', { category: '维修' })]), {
+    kind: 'other',
+    category: '维修',
+  });
+  assert.deepEqual(defaults('车险续期', [done('a', '2025-01-01', 'service')]), { kind: 'service', category: '其他' });
+  assert.deepEqual(
+    defaults('车险续期', [done('a', '2024-01-01', 'service'), done('b', '2025-01-01', 'other', { category: '保险' })]),
+    { kind: 'other', category: '保险' }
+  );
+  // Unfinished records and completions of other plans do not count.
+  assert.deepEqual(
+    defaults('机油机滤', [
+      done('a', '2025-01-01', 'other', { complete: false }),
+      done('b', '2025-01-01', 'other', { planId: 'q' }),
+    ]),
+    { kind: 'service', category: '其他' }
+  );
+});
 test('计划按剩余量占提前量的比例排序，并给出剩余天数与公里数', () => {
   const p = D.normalizePlan({ id: 'p', name: '保养', dueMileage: 2000, leadKm: 500 }, 'v'),
     q = D.normalizePlan({ id: 'q', name: '车险', dueDate: '2025-02-21', leadDays: 30 }, 'v'),
