@@ -288,6 +288,16 @@ const PLAN_PRESETS = [
 function planPresets(v) {
   return PLAN_PRESETS.filter(p => !p.engine || typeOf(v).fuel);
 }
+// A new record that completes `plan` starts like the last completion of that plan. With none yet, insurance and
+// inspection plans default to other expenses (DESIGN.md files them there) and everything else to maintenance.
+function planRecordDefaults(plan, records) {
+  const last = records
+    .filter(r => r.planId === plan.id && r.complete && PLAN_KINDS.includes(r.kind))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.mileage - a.mileage || b.id.localeCompare(a.id))[0];
+  if (last) return { kind: last.kind, category: last.kind === 'other' ? last.category || '其他' : '其他' };
+  const category = /险/.test(plan.name) ? '保险' : /年检|年审/.test(plan.name) ? '年检' : '';
+  return category ? { kind: 'other', category } : { kind: 'service', category: '其他' };
+}
 function normalizePlan(input, vehicleId) {
   const name = String(input.name || '').trim();
   assert(name && name.length <= 40, '项目名称必填，最多 40 字');
@@ -394,6 +404,7 @@ module.exports = {
   monthlyTrend,
   mileageStats,
   planPresets,
+  planRecordDefaults,
   normalizePlan,
   daysBetween,
   reminder,

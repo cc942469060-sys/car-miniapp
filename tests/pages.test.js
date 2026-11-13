@@ -251,7 +251,7 @@ test('账本合计随类型筛选变化；删除记录和计划提示已删除',
   loadPage('plan', { id: pid }).remove();
   assert.deepEqual(toasts, ['已删除', '已删除']);
 });
-test('首页按紧急程度显示前两条计划；完成车险计划可记为其他费用并进入养护历史', () => {
+test('首页按紧急程度显示前两条计划；完成车险计划默认记为其他费用并进入养护历史', () => {
   const today = U.D.today(),
     later = n => {
       const d = new Date(today + 'T00:00:00Z');
@@ -274,7 +274,9 @@ test('首页按紧急程度显示前两条计划；完成车险计划可记为�
     entry.data.kinds.map(k => k.id),
     ['service', 'other']
   );
-  entry.pickKind({ currentTarget: { dataset: { index: 1 } } });
+  assert.equal(entry.data.form.kind, 'other');
+  assert.equal(entry.data.kindIndex, 1);
+  assert.equal(entry.data.form.category, '保险');
   entry.setData({ 'form.mileage': '29990', 'form.amount': '3800' });
   entry.save();
   assert.equal(raw.records[0].kind, 'other');
@@ -493,7 +495,9 @@ test('填写金额和单价自动算出油量；手动改过油量后不再覆�
 test('其他费用可选类别；完成车险计划默认归为保险；账本标题显示类别', () => {
   const id = createCar('fuel'),
     pid = U.getStore().savePlan({ vehicleId: id, name: '车险续期', dueDate: '2025-02-01' });
-  assert.equal(loadPage('entry', { vehicleId: id, planId: pid }).data.form.category, '保险');
+  const planEntry = loadPage('entry', { vehicleId: id, planId: pid });
+  assert.equal(planEntry.data.form.kind, 'other');
+  assert.equal(planEntry.data.form.category, '保险');
   const entry = loadPage('entry', { vehicleId: id });
   entry.pickKind({ currentTarget: { dataset: { index: entry.data.kinds.findIndex(k => k.id === 'other') } } });
   entry.pickCategory({ currentTarget: { dataset: { value: '停车' } } });
