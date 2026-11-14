@@ -194,7 +194,7 @@ test('四种车辆切换后页面、表单与费用隔离，归档可恢复', ()
   garage.archive({ currentTarget: { dataset: { id: ids[3], archived: true } } });
   assert.equal(raw.vehicles[3].archived, false);
 });
-test('新记录不预填里程而提示最近读数；日期在打开页面时取当天，跨零点不过期', () => {
+test('新加油记录预填最近读数并提示其日期；日期在打开页面时取当天，跨零点不过期', () => {
   const id = createCar(),
     RealDate = Date;
   let now = new RealDate(2026, 10, 8, 23, 50).getTime();
@@ -212,7 +212,9 @@ test('新记录不预填里程而提示最近读数；日期在打开页面时�
       ledger = definePage('ledger');
     now = new RealDate(2026, 10, 9, 0, 20).getTime();
     const p = openPage(entry, { vehicleId: id });
-    assert.equal(p.data.form.mileage, '');
+    assert.equal(p.data.form.mileage, '1000');
+    assert.equal(p.data.readingMileage, '1000');
+    assert.equal(p.data.readingDate, '2025-01-01');
     assert.equal(p.data.mileageHint, '最近读数 1000 km（2025-01-01）');
     assert.equal(p.data.form.date, '2026-11-09');
     assert.equal(p.data.today, '2026-11-09');
@@ -377,6 +379,56 @@ test('新记录沿用上次的加满与充电完整选择，并提示上次充�
   assert.equal(entry.data.form.confirmed, true);
   assert.equal(entry.data.socHint, '上次充到 80%');
 });
+test('新加油、充电记录沿用上次同类记录的单价、备注与充电后电量；切换类型时跟着换，手动改过的不变', () => {
+  const id = createCar(),
+    store = U.getStore();
+  store.saveRecord({
+    vehicleId: id,
+    kind: 'fuel',
+    date: '2025-01-02',
+    mileage: '1100',
+    amount: '300',
+    quantity: '40',
+    note: '92 号汽油',
+    full: true,
+  });
+  store.saveRecord({
+    vehicleId: id,
+    kind: 'charge',
+    date: '2025-01-03',
+    mileage: '1150',
+    amount: '18.51',
+    quantity: '30',
+    socAfter: '80',
+    note: '家充',
+  });
+  store.saveRecord({ vehicleId: id, kind: 'other', date: '2025-01-04', amount: '10', category: '停车', note: '商场' });
+  const entry = loadPage('entry', { vehicleId: id }),
+    pick = kind =>
+      entry.pickKind({ currentTarget: { dataset: { index: entry.data.kinds.findIndex(k => k.id === kind) } } }),
+    type = (field, value) => entry.input({ currentTarget: { dataset: { field } }, detail: { value } }),
+    prefilled = () => {
+      const f = entry.data.form;
+      return { mileage: f.mileage, price: f.price, note: f.note, socAfter: f.socAfter };
+    };
+  assert.equal(entry.data.form.kind, 'fuel');
+  assert.deepEqual(prefilled(), { mileage: '1150', price: '7.50', note: '92 号汽油', socAfter: '' });
+  pick('charge');
+  assert.deepEqual(prefilled(), { mileage: '1150', price: '0.617', note: '家充', socAfter: '80' });
+  // Parking fees keep their mileage optional, so other kinds start empty.
+  pick('other');
+  assert.deepEqual(prefilled(), { mileage: '', price: '', note: '', socAfter: '' });
+  pick('charge');
+  type('mileage', '1300');
+  type('note', '公司充电桩');
+  pick('fuel');
+  assert.deepEqual(prefilled(), { mileage: '1300', price: '7.50', note: '公司充电桩', socAfter: '' });
+  // Editing a record keeps its own values, whatever the kind.
+  const edit = loadPage('entry', { id: raw.records.find(r => r.kind === 'charge').id });
+  assert.equal(edit.data.form.price, '0.617');
+  edit.pickKind({ currentTarget: { dataset: { index: 0 } } });
+  assert.equal(edit.data.form.note, '家充');
+});
 test('疑似录错时先确认：取消不保存，确认后保存', () => {
   const id = createCar('fuel'),
     entry = loadPage('entry', { vehicleId: id });
@@ -420,6 +472,27 @@ test('核对弹窗出现前连点两次保存，只弹一次、只记一笔；�
   assert.equal(raw.records.length, 1);
   entry.commit();
   assert.equal(raw.records.length, 1);
+});
+test('新加油记录的里程没从最近读数改过、又不是同一天时，保存前先请用户核对', () => {
+  const id = createCar('fuel'),
+    entry = loadPage('entry', { vehicleId: id });
+  answer = { confirm: false };
+  entry.setData({ 'form.date': '2025-01-02', 'form.amount': '300', 'form.quantity': '40' });
+  entry.save();
+  assert.equal(modals.length, 1);
+  assert.match(modals[0], /累计里程与 2025-01-01 的最近读数相同/);
+  assert.equal(raw.records.length, 0);
+  // On the day of the reading, refuelling again without driving is normal.
+  entry.setData({ 'form.date': '2025-01-01' });
+  entry.save();
+  assert.equal(modals.length, 1);
+  assert.equal(raw.records.length, 1);
+  // An updated mileage saves without asking.
+  const next = loadPage('entry', { vehicleId: id });
+  next.setData({ 'form.date': '2025-01-03', 'form.mileage': '1200', 'form.amount': '300', 'form.quantity': '40' });
+  next.save();
+  assert.equal(modals.length, 1);
+  assert.equal(raw.records.length, 2);
 });
 test('首页和统计页说明算不出油耗的原因；首页可直接更新里程', () => {
   const id = createCar('fuel');
@@ -516,6 +589,33 @@ test('填写金额和单价自动算出油量；手动改过油量后不再覆�
   type('quantity', '');
   type('price', '7.48');
   assert.equal(entry.data.form.quantity, '39.97');
+});
+test('金额留空时，填写单价和加油量自动算出金额；手动填过金额后不再覆盖，清空后恢复', () => {
+  const id = createCar('fuel'),
+    entry = loadPage('entry', { vehicleId: id }),
+    type = (field, value) => entry.input({ currentTarget: { dataset: { field } }, detail: { value } });
+  type('price', '7.5');
+  type('quantity', '40');
+  assert.equal(entry.data.form.amount, '300.00');
+  type('quantity', '41');
+  assert.equal(entry.data.form.amount, '307.50');
+  type('amount', '310');
+  type('quantity', '42');
+  assert.equal(entry.data.form.amount, '310');
+  type('amount', '');
+  assert.equal(entry.data.form.amount, '');
+  type('price', '7.6');
+  assert.equal(entry.data.form.amount, '319.20');
+  // Half-up to the fen: 1 L at 1.005 元 is 1.01, where binary rounding would give 1.00.
+  type('price', '1.005');
+  type('quantity', '1');
+  assert.equal(entry.data.form.amount, '1.01');
+  type('price', '7.62');
+  type('quantity', '39.37');
+  assert.equal(entry.data.form.amount, '300.00');
+  entry.setData({ 'form.date': '2025-01-02', 'form.mileage': '1200' });
+  entry.save();
+  assert.deepEqual([raw.records[0].cents, raw.records[0].quantity100], [30000, 3937]);
 });
 test('其他费用可选类别；完成车险计划默认归为保险；账本标题显示类别', () => {
   const id = createCar('fuel'),
