@@ -108,7 +108,7 @@ Page(
     },
     // Likely typos get a confirmation rather than a block; validation errors are shown next to their field.
     save() {
-      if (this.data.saving || !this.data.ready) return;
+      if (this.data.saving || this.confirming || !this.data.ready) return;
       U.guard(
         this,
         () => {
@@ -120,19 +120,27 @@ Page(
               s.records
             );
           if (!warnings.length) return this.commit();
+          // One confirmation at a time: a second tap before the dialog shows must not open another one.
+          this.confirming = true;
           wx.showModal({
             title: '请核对',
             content: warnings.join('；') + '。确认无误再保存。',
             confirmText: '仍要保存',
             success: r => {
+              this.confirming = false;
               if (r.confirm) this.commit();
+            },
+            fail: () => {
+              this.confirming = false;
             },
           });
         },
         FIELDS
       );
     },
+    // Saving twice must not write twice, whichever path calls this.
     commit() {
+      if (this.data.saving) return;
       this.setData({ saving: true });
       const id = U.guard(this, () => U.getStore().saveRecord(this.data.form), FIELDS);
       if (id) U.saved();
