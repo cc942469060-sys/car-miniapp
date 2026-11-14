@@ -266,6 +266,36 @@ test('完成计划的新记录默认沿用该计划上次的类型；没有记�
     { kind: 'service', category: '其他' }
   );
 });
+test('单价由金额和数量反推，取能还原金额的最短小数；新加油、充电记录预填最近读数和上次同类记录的值', () => {
+  const price = (cents, quantity100) => D.unitPrice({ cents, quantity100 });
+  assert.equal(price(30000, 4000), '7.50');
+  assert.equal(price(30000, 3937), '7.62');
+  assert.equal(price(1851, 3000), '0.617');
+  assert.equal(price(1953, 4000), '0.4883');
+  assert.equal(price(0, 4000), '');
+  const { store } = fixture(),
+    id = car(store),
+    defaults = kind => {
+      const s = store.read();
+      return D.recordDefaults(s.vehicles[0], s.records, kind);
+    };
+  assert.deepEqual(defaults('fuel'), { mileage: '1000', price: '', note: '', socAfter: '' });
+  record(store, id, { note: '92 号汽油' });
+  record(store, id, { date: '2025-01-05', mileage: '1300', amount: '300', quantity: '40', note: '95 号汽油' });
+  record(store, id, {
+    kind: 'charge',
+    date: '2025-01-03',
+    mileage: '1150',
+    amount: '18.51',
+    quantity: '30',
+    socAfter: '80',
+    note: '家充',
+  });
+  // The latest of each kind counts, and the mileage is the latest reading of any kind.
+  assert.deepEqual(defaults('fuel'), { mileage: '1300', price: '7.50', note: '95 号汽油', socAfter: '' });
+  assert.deepEqual(defaults('charge'), { mileage: '1300', price: '0.617', note: '家充', socAfter: '80' });
+  assert.deepEqual(defaults('service'), { mileage: '', price: '', note: '', socAfter: '' });
+});
 test('计划按剩余量占提前量的比例排序，并给出剩余天数与公里数', () => {
   const p = D.normalizePlan({ id: 'p', name: '保养', dueMileage: 2000, leadKm: 500 }, 'v'),
     q = D.normalizePlan({ id: 'q', name: '车险', dueDate: '2025-02-21', leadDays: 30 }, 'v'),
@@ -427,6 +457,12 @@ test('录入合理性：里程跳变、超大补能量与异常单价给出提�
   assert.match(warn({ quantity100: 15000, cents: 112500 }), /超过常见油箱容量/);
   assert.match(warn({ cents: 3000 }), /单价约 ¥0\.75\/L/);
   assert.match(warn({ kind: 'charge', cents: 60000, quantity100: 2000 }), /¥30\.00\/kWh/);
+  // A new fuel or charge record that kept the latest reading on another day. Editing, the same day and other kinds pass.
+  assert.equal(warn({ id: '', mileage: 1300 }), '累计里程与 2025-01-02 的最近读数相同，可能还没改成仪表上的当前里程');
+  assert.match(warn({ id: '', kind: 'charge', mileage: 1300, cents: 6000 }), /最近读数相同/);
+  assert.equal(warn({ id: '', mileage: 1300, date: '2025-01-02' }), '');
+  assert.equal(warn({ id: 'a', mileage: 1300 }), '');
+  assert.equal(warn({ id: '', kind: 'service', mileage: 1300, cents: 50000, quantity100: 0 }), '');
 });
 test('充电记录只保留「充电都已记录」一个开关，不再保存漏记标记', () => {
   const { store } = fixture(),

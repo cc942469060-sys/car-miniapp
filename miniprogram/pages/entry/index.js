@@ -27,11 +27,16 @@ Page(
       kindIndex: 0,
       categories: U.D.OTHER_CATEGORIES,
       autoQuantity: true,
+      autoAmount: true,
+      readingMileage: '',
+      readingDate: '',
       error: '',
       saving: false,
       ready: false,
     },
     onLoad(options) {
+      // Fields typed by hand; switching the record kind leaves them alone.
+      this.typed = {};
       U.guard(this, () => {
         const s = U.getStore().read(),
           record = options.id ? s.records.find(r => r.id === options.id) : null;
@@ -41,7 +46,7 @@ Page(
         const planId = record ? record.planId : options.planId,
           plan = planId ? s.plans.find(p => p.id === planId && p.vehicleId === v.id) : null;
         U.D.assert(!planId || plan, '关联计划不存在');
-        // Read today on open, not at page registration. Mileage is never pre-filled: an unchanged stale reading would distort energy intervals.
+        // Read today on open, not at page registration.
         const today = U.D.today(),
           last = U.D.currentMileage(v, s.records),
           kinds = U.D.allowedKinds(v)
@@ -53,6 +58,9 @@ Page(
             .sort((a, b) => b.date.localeCompare(a.date) || b.mileage - a.mileage || b.id.localeCompare(a.id)),
           lastFuel = mine.find(r => r.kind === 'fuel'),
           lastCharge = mine.find(r => r.kind === 'charge');
+        // New fuel and charge records start from the latest reading and the last record of their kind.
+        this.defaults = {};
+        kinds.forEach(k => (this.defaults[k.id] = U.D.recordDefaults(v, s.records, k.id)));
         let form = Object.assign({}, this.data.form, {
           vehicleId: v.id,
           kind: kinds[0].id,
@@ -62,7 +70,7 @@ Page(
         });
         if (record)
           form = Object.assign(form, U.D.recordInput(record), {
-            price: record.quantity100 && record.cents ? (record.cents / record.quantity100).toFixed(2) : '',
+            price: U.D.unitPrice(record),
             category: record.category || '其他',
           });
         else if (plan)
@@ -71,6 +79,7 @@ Page(
             { planId: plan.id, complete: true, note: plan.name },
             U.D.planRecordDefaults(plan, s.records)
           );
+        else form = Object.assign(form, this.defaults[form.kind]);
         this.setData({
           vehicle: v,
           kinds,
@@ -78,30 +87,60 @@ Page(
           kindIndex: kinds.findIndex(k => k.id === form.kind),
           planName: plan ? plan.name : '',
           autoQuantity: !record,
+          autoAmount: !record,
           today,
           mileageHint: `最近读数 ${last.mileage} km（${last.date}）`,
+          readingMileage: String(last.mileage),
+          readingDate: last.date,
           socHint: lastCharge && lastCharge.socAfter != null ? `上次充到 ${lastCharge.socAfter}%` : '如 80',
           ready: true,
         });
         wx.setNavigationBarTitle({ title: record ? '记录详情' : '记一笔' });
       });
     },
+    // A new record takes on the defaults of the kind it switches to, except in fields typed by hand.
     pickKind(e) {
-      const i = Number(e.currentTarget.dataset.index);
-      this.setData({ kindIndex: i, 'form.kind': this.data.kinds[i].id, error: '', errorField: '' });
+      const i = Number(e.currentTarget.dataset.index),
+        kind = this.data.kinds[i].id,
+        patch = { kindIndex: i, 'form.kind': kind, error: '', errorField: '' };
+      if (!this.data.form.id && !this.data.form.planId) {
+        const d = this.defaults[kind];
+        Object.keys(d).forEach(field => {
+          if (!this.typed[field]) patch['form.' + field] = d[field];
+        });
+        Object.assign(patch, this.fill(patch));
+      }
+      this.setData(patch);
     },
-    // Amount and unit price fill in the quantity until it is typed by hand; clearing the quantity hands it back.
+    // At the unit price, a typed amount fills in the quantity and a typed quantity fills in an empty amount. A filled-in
+    // value follows the typed ones until it is typed by hand; clearing it hands it back.
     input(e) {
       const field = e.currentTarget.dataset.field,
         value = e.detail.value,
-        patch = { ['form.' + field]: value, error: '', errorField: '' },
-        f = Object.assign({}, this.data.form, { [field]: value }),
-        amount = Number(f.amount),
-        price = Number(f.price);
+        patch = { ['form.' + field]: value, error: '', errorField: '' };
+      this.typed[field] = true;
+      if (field === 'amount') patch.autoAmount = value === '';
       if (field === 'quantity') patch.autoQuantity = value === '';
-      else if ((field === 'amount' || field === 'price') && this.data.autoQuantity && amount > 0 && price > 0)
-        patch['form.quantity'] = (amount / price).toFixed(2);
+      if (field === 'amount' || field === 'price' || field === 'quantity')
+        Object.assign(patch, this.fill(patch, field));
       this.setData(patch);
+    },
+    // The quantity and amount to fill in once `patch` applies. Only typed values are used, so a filled-in value never
+    // feeds the other one, and the field being typed is never refilled under the cursor.
+    fill(patch, typing) {
+      const get = key => ('form.' + key in patch ? patch['form.' + key] : this.data.form[key]),
+        autoAmount = 'autoAmount' in patch ? patch.autoAmount : this.data.autoAmount,
+        autoQuantity = 'autoQuantity' in patch ? patch.autoQuantity : this.data.autoQuantity,
+        amount = Number(get('amount')),
+        price = Number(get('price')),
+        quantity = Number(get('quantity')),
+        filled = {};
+      if (autoQuantity && !autoAmount && typing !== 'quantity' && amount > 0 && price > 0)
+        filled['form.quantity'] = (amount / price).toFixed(2);
+      // Half-up to the fen; the nudge undoes binary error such as 1.005 * 100 = 100.49999….
+      if (autoAmount && !autoQuantity && typing !== 'amount' && quantity > 0 && price > 0)
+        filled['form.amount'] = U.D.money(Math.round(quantity * price * 100 + 1e-7));
+      return filled;
     },
     pickCategory(e) {
       this.setData({ 'form.category': e.currentTarget.dataset.value, error: '', errorField: '' });

@@ -143,6 +143,28 @@ function recordInput(r) {
     socAfter: r.socAfter == null ? '' : String(r.socAfter),
   });
 }
+// Records keep the amount and quantity, not the unit price. The shortest price (2 to 4 decimals) that gives back the
+// stored amount is the one that was typed in nearly every case, e.g. 0.617 元/kWh rather than 0.62.
+function unitPrice(r) {
+  if (!r.cents || !r.quantity100) return '';
+  const exact = r.cents / r.quantity100,
+    digits = [2, 3].find(d => Math.round(Number(exact.toFixed(d)) * r.quantity100) === r.cents);
+  return exact.toFixed(digits || 4);
+}
+// A new fuel or charge record starts from the latest reading and repeats the unit price, note and state of charge of
+// the last record of its kind. Other kinds start empty, so parking fees and the like keep their mileage optional.
+function recordDefaults(v, records, kind) {
+  if (kind !== 'fuel' && kind !== 'charge') return { mileage: '', price: '', note: '', socAfter: '' };
+  const last = records
+    .filter(r => r.vehicleId === v.id && r.kind === kind)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.mileage - a.mileage || b.id.localeCompare(a.id))[0];
+  return {
+    mileage: String(currentMileage(v, records).mileage),
+    price: last ? unitPrice(last) : '',
+    note: last ? last.note || '' : '',
+    socAfter: last && last.socAfter != null ? String(last.socAfter) : '',
+  };
+}
 // Soft checks for likely typos in a normalized record; the user confirms and may still save.
 function recordWarnings(r, v, records) {
   const warnings = [],
@@ -155,6 +177,12 @@ function recordWarnings(r, v, records) {
     const km = prev ? r.mileage - prev.mileage : 0;
     if (km > 2000 && km > Math.max(1, daysBetween(r.date, prev.date)) * 800)
       warnings.push(`里程比 ${prev.date} 的 ${prev.mileage} km 多出 ${km} km`);
+    // New fuel and charge records start at the latest reading (recordDefaults). Keeping it on another day usually
+    // means it was not updated; on the same day, refuelling or charging again without driving is normal.
+    const latest = currentMileage(v, records),
+      isNew = !records.some(x => x.id === r.id);
+    if (isNew && (r.kind === 'fuel' || r.kind === 'charge') && r.mileage === latest.mileage && r.date !== latest.date)
+      warnings.push(`累计里程与 ${latest.date} 的最近读数相同，可能还没改成仪表上的当前里程`);
   }
   if (quantity > (r.kind === 'fuel' ? 120 : 150))
     warnings.push(
@@ -398,6 +426,8 @@ module.exports = {
   normalizeVehicle,
   normalizeRecord,
   recordInput,
+  unitPrice,
+  recordDefaults,
   recordWarnings,
   energyIntervals,
   statistics,
