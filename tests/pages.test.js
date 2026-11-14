@@ -396,6 +396,31 @@ test('疑似录错时先确认：取消不保存，确认后保存', () => {
   entry.save();
   assert.equal(raw.records.length, 1);
 });
+test('核对弹窗出现前连点两次保存，只弹一次、只记一笔；取消后可以再次保存', () => {
+  const id = createCar('fuel'),
+    entry = loadPage('entry', { vehicleId: id }),
+    queued = [];
+  // Dialogs wait for an answer instead of answering at once, like a user tapping twice before the first one shows.
+  wx.showModal = o => queued.push(o);
+  entry.setData({
+    'form.date': '2025-01-02',
+    'form.mileage': '12000',
+    'form.amount': '300',
+    'form.quantity': '40',
+    'form.full': true,
+  });
+  entry.save();
+  entry.save();
+  assert.equal(queued.length, 1);
+  queued[0].success({ confirm: false });
+  assert.equal(raw.records.length, 0);
+  entry.save();
+  assert.equal(queued.length, 2);
+  queued[1].success({ confirm: true });
+  assert.equal(raw.records.length, 1);
+  entry.commit();
+  assert.equal(raw.records.length, 1);
+});
 test('首页和统计页说明算不出油耗的原因；首页可直接更新里程', () => {
   const id = createCar('fuel');
   let home = loadPage('home');
