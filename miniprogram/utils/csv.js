@@ -1,4 +1,5 @@
 const D = require('./domain');
+const C = require('./charging');
 // One row per record, for reimbursement or for analysing in a spreadsheet; it is not a backup format.
 const HEADER = [
   '车辆',
@@ -35,8 +36,9 @@ function recordsCsv(state) {
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date) || (a.mileage || 0) - (b.mileage || 0) || a.id.localeCompare(b.id))
     .map(r => {
+      // 数据来源 says whether the amount is actual, shared from a bill, or an estimate, as in the app.
       const quantity = r.quantity100 ? (r.quantity100 / 100).toFixed(2) : '',
-        source = { soc: '电量差', power: '功率时长', typed: '手填' }[r.estMethod] || '';
+        source = r.home ? C.confidenceText(C.confidence(r, state)) : '';
       return [
         cell(vehicles.get(r.vehicleId)),
         r.date,

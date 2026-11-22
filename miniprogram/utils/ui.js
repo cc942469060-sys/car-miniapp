@@ -11,13 +11,13 @@ function recordView(r, rates, state) {
     view = Object.assign({}, r, {
       title: r.kind === 'other' && r.category && r.category !== '其他' ? r.category : D.KINDS[r.kind],
       amount: cents == null ? '' : D.yuan(cents),
-      quantity: quantity100 ? (r.quantity100 == null ? '≈' : '') + (quantity100 / 100).toFixed(2) : '',
+      quantity: quantity100 ? (D.isEstimated(r) ? '≈' : '') + (quantity100 / 100).toFixed(2) : '',
       unit,
       symbol: { fuel: '油', charge: '电', service: '养', other: '账' }[r.kind],
       detail: [price, rates && rates[r.id]].filter(Boolean).join(' · '),
     }),
     confidence = r.home ? C.confidence(r, state || {}) : 'actual';
-  view.priceText = (r.cents == null ? '预估 ' : '') + '¥' + view.amount;
+  view.priceText = (D.isEstimated(r) ? '预估 ' : '') + '¥' + view.amount;
   view.confidence = confidence === 'actual' ? '' : C.confidenceText(confidence);
   view.pending = r.home && r.settle === 'pending';
   view.allocated = r.home ? C.allocatedPercent(r) : 0;
