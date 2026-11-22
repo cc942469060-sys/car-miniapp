@@ -22,8 +22,12 @@ Page(
           Object.assign(x.data, {
             filter,
             filters: [{ id: 'all', name: '全部' }].concat(allowed.map(id => ({ id, name: U.D.KINDS[id] }))),
-            records: records.map(r => U.recordView(r, rates)),
-            amount: U.D.yuan(records.reduce((s, r) => s + r.cents, 0)),
+            records: records.map(r => U.recordView(r, rates, x.s)),
+            amount: U.D.yuan(records.reduce((s, r) => s + U.D.effectiveCents(r), 0)),
+            estimated: (() => {
+              const cents = records.filter(r => r.cents == null).reduce((s, r) => s + U.D.effectiveCents(r), 0);
+              return cents ? U.D.money(cents) : '';
+            })(),
             count: records.length,
           })
         );

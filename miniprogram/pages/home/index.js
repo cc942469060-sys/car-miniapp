@@ -13,18 +13,31 @@ Page(
         const stats = U.D.statistics(x.records, U.D.today().slice(0, 7)),
           type = U.D.typeOf(x.v),
           energy = U.D.energyIntervals(x.records, type.fuel ? 'fuel' : 'charge'),
-          rates = U.intervalRates(x.records);
+          rates = U.intervalRates(x.records),
+          home = U.homeSummary(x.s, x.v),
+          estimated = stats.estimatedCents ? U.D.money(stats.estimatedCents) : '',
+          estimatedCharge = stats.estimatedCharge100 ? (stats.estimatedCharge100 / 100).toFixed(2) : '';
         this.setData(
           Object.assign(x.data, {
             month: U.D.today().slice(0, 7),
             amount: U.D.yuan(stats.total),
+            estimated,
             count: stats.count,
+            home,
+            pendingAmount: U.D.money(home.pendingCents),
             metrics: [
               ...(type.fuel
                 ? [{ label: '本月加油量', value: (stats.fuel / 100).toFixed(2), unit: 'L', note: '按实际记录累计' }]
                 : []),
               ...(type.charge
-                ? [{ label: '本月充电量', value: (stats.charge / 100).toFixed(2), unit: 'kWh', note: '账单充入电量' }]
+                ? [
+                    {
+                      label: '本月充电量',
+                      value: (stats.charge / 100).toFixed(2),
+                      unit: 'kWh',
+                      note: estimatedCharge ? `账单充入电量 · 含预估 ${estimatedCharge} kWh` : '账单充入电量',
+                    },
+                  ]
                 : []),
               ...(!(type.fuel && type.charge)
                 ? [
@@ -37,7 +50,7 @@ Page(
                   ]
                 : []),
             ],
-            recent: x.records.slice(0, 3).map(r => U.recordView(r, rates)),
+            recent: x.records.slice(0, 3).map(r => U.recordView(r, rates, x.s)),
             plans: x.plans.filter(p => p.state !== 'done').slice(0, 2),
             backupNudge: B.backupNudge(x.s.records.length),
             // New owners get a short checklist until the car has both a record and a reminder.
@@ -45,6 +58,9 @@ Page(
           })
         );
       });
+    },
+    viewSettle() {
+      wx.navigateTo({ url: '/pages/settle/index' });
     },
   })
 );

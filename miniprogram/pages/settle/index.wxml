@@ -1,0 +1,21 @@
+<view class="page"><view class="title">家充对账</view><view class="subtitle">电网账单出来后，把待对账的家充分摊成实际值。</view><view wx:if="{{error}}" class="error">{{error}}</view>
+<block wx:if="{{meter === 'dedicated'}}">
+<view class="hero"><view class="hero-label">待对账</view><view class="amount"><text class="currency">¥</text>{{pendingAmount}}</view><view class="hero-foot">{{pending.length}} 笔家充还是预估；录入账单后自动分摊</view></view>
+<view class="section"><text class="section-title">录入账单</text></view>
+<view class="muted">按电网账单的起止日期与总电量填写。金额不填时，按电价表里的时段价格计算。保存前可以先看分摊结果。</view>
+<view class="field"><view class="label">开始日期 *</view><picker mode="date" value="{{form.from}}" end="{{form.to}}" data-field="from" bindchange="input"><view class="picker">{{form.from || '选择日期'}} ▾</view></picker></view>
+<view class="field"><view class="label">结束日期 *</view><picker mode="date" value="{{form.to}}" end="{{today}}" data-field="to" bindchange="input"><view class="picker">{{form.to || '选择日期'}} ▾</view></picker></view>
+<view class="field" id="f-quantity"><view class="label">账单总电量 · kWh *</view><input class="input" type="digit" value="{{form.quantity}}" data-field="quantity" bindinput="input" placeholder="例如 30.80"/></view>
+<view class="field" id="f-amount"><view class="label">账单金额 · 元（选填）</view><input class="input" type="digit" value="{{form.amount}}" data-field="amount" bindinput="input" placeholder="不填则按电价表计算"/></view>
+<view class="field"><view class="label">备注（选填）</view><input class="input" value="{{form.note}}" maxlength="120" data-field="note" bindinput="input" placeholder="例如：11 月上半月电费"/></view>
+<view class="actions"><button class="secondary" bindtap="previewBill">预览分摊</button><button class="primary" loading="{{saving}}" bindtap="saveBill">{{form.id ? '保存修改' : '保存账单'}}</button></view>
+<block wx:if="{{preview}}"><view class="card"><view class="row-title">分摊预览</view><view wx:for="{{preview.rows}}" wx:key="id" class="row"><view class="row-main"><view class="row-title">{{item.date}} · {{item.range}}</view><view class="row-meta">{{item.vehicle}} · 预估 {{item.estimate}} kWh · 权重 {{item.weight}} kWh</view></view><view class="row-price">{{item.quantity}} kWh · ¥{{item.amount}}</view></view><view class="tiny" wx:if="{{!preview.rows.length}}">这段时间没有可分摊的家充记录。</view><view class="notice" wx:for="{{preview.warnings}}" wx:key="*this">{{item}}</view></view></block>
+<view class="section"><text class="section-title">账单</text></view>
+<view wx:if="{{!bills.length}}" class="empty"><view class="muted">还没有录入账单。账单覆盖到的家充会变成实际值，没覆盖到的继续待对账。</view></view>
+<view wx:for="{{bills}}" wx:key="id" class="card"><view class="row"><view class="row-main"><view class="row-title">{{item.range}}</view><view class="row-meta">{{item.quantity}} kWh · {{item.amount}}</view><view class="row-meta" wx:if="{{item.note}}">{{item.note}}</view></view></view><view class="actions"><button class="quiet" data-id="{{item.id}}" bindtap="editBill">编辑</button><button class="quiet" data-id="{{item.id}}" bindtap="deleteBill">删除</button></view></view>
+<view class="section"><text class="section-title">待对账</text></view>
+<view wx:if="{{!pending.length}}" class="empty"><view class="muted">没有待对账的家充。新的家充会先按预估入账。</view></view>
+<view wx:for="{{pending}}" wx:key="id" class="row" data-id="{{item.id}}" bindtap="openRecord" aria-role="button"><view class="symbol">电</view><view class="row-main"><view class="row-title">{{item.date}} · {{item.range}}</view><view class="row-meta">{{item.vehicle}} · 预估 {{item.quantity}} kWh · ¥{{item.amount}}</view><view class="row-meta" wx:if="{{item.allocated}}">已对账 {{item.allocated}}%</view></view></view>
+</block>
+<block wx:else><view class="notice">共用总表按预估电量与电价入账，不需要也不支持录入电网账单。家充记录会一直带「预估」标签。<text class="link" bindtap="goHomeCharge">去家充设置</text></view><view class="empty" wx:if="{{meter !== 'shared'}}"><view class="muted">还没有设置电表类型。独立电表才能录入账单并对账。</view></view></block>
+<view class="footer-note">账单只用来分摊家充，不会重复计入支出：家充自己的金额会被替换为分摊结果。同一辆车的家充时段不能重叠。</view></view>

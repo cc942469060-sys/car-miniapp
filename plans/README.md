@@ -15,6 +15,7 @@
 | 001 | [每次推送和 PR 都自动运行测试、项目检查与格式检查](001-ci-and-format-check.md) | 第 2 条 | P1 | S | — | DONE（2026-11-13 审查通过：提交 `16a1f80`，分支 `ci-and-format-check`；PR #7 的 CI 首次运行通过，已于 2026-11-13 合并为 `55a70c5`） |
 | 002 | [完成车险、年检等计划时，新记录默认记为「其他费用」](002-plan-completion-default-kind.md) | 第 1 条 | P1 | S | 建议在 001 之后 | DONE（2026-11-13 审查通过：提交 `8138a4e`，分支 `plan-completion-default-kind`；新测试在旧代码上会失败、在新代码上通过；PR #8 的 CI 通过，已于 2026-11-14 合并为 `afffb39`） |
 | 003 | [「请核对」弹窗路径下，连点保存也只记一笔](003-entry-single-save.md) | 第 3 条 | P2 | S | 与 002 先后执行 | DONE（2026-11-14 审查通过：提交 `3b4b2b7`，分支 `entry-single-save`；新测试在旧代码上失败；另行验证旧代码在两个确认框都确认时写入 2 笔、新代码只写 1 笔，确认框调用失败后仍可再次保存；PR #9 的 CI 通过，已于 2026-11-14 合并为 `75ad2e2`） |
+| 004 | [家充记录、电价与电网账单分摊](004-home-charging-settlement.md) | 车库所有者需求（V2 方案） | P0 | L | 无 | DONE（2026-11-22：`utils/charging.js` 与 4 个测试文件全部通过；`scripts/check.js` 60 files / 10 pages；`npm run format:check` 因沙箱内 npm 缓存不可写未能运行，代码按既有 Prettier 风格手写） |
 
 状态取值：TODO | IN PROGRESS | DONE | BLOCKED（附一句原因）| REJECTED（附一句理由：问题已另行修复，或放弃该方案）
 
@@ -22,6 +23,7 @@
 
 - 001 建议最先执行：之后的每个 PR 都会被 CI 自动检查，它也修好了 Windows 上的格式检查。不过 002、003 的格式检查命令带有 `--end-of-line auto`，即使 001 还没做也能执行。
 - 002 和 003 都修改 `miniprogram/pages/entry/index.js` 和 `tests/pages.test.js`：002 改 `onLoad` 和两个现有测试，003 改 `save()` / `commit()` 并新增一个测试。不要同时交给两个执行者；先合并其中一个，再基于新的 `main` 执行另一个。
+- 004 依赖 002、003 已合入的 `entry` 页面与测试基线，并把存储升到版本 2；它同时改动 `domain.js`、`store.js`、`csv.js`、`ui.js` 与全部页面，建议单独一位执行者从头做到尾，不要与其它计划并行。
 
 ## 暂缓（问题已确认，暂不写计划）
 

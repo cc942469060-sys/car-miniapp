@@ -2,9 +2,10 @@ const U = require('../../utils/ui');
 Page(
   Object.assign({}, U.common, {
     data: {
-      form: { name: '', model: '', type: 'fuel', baseDate: '', baseMileage: '' },
+      form: { name: '', model: '', type: 'fuel', baseDate: '', baseMileage: '', batteryKwh: '' },
       types: U.D.TYPES,
       typeIndex: 0,
+      charge: false,
       today: '',
       error: '',
       saving: false,
@@ -17,12 +18,19 @@ Page(
                 .read()
                 .vehicles.find(x => x.id === options.id)
             : null,
-          today = U.D.today();
+          today = U.D.today(),
+          typeIndex = v ? U.D.TYPES.findIndex(t => t.id === v.type) : 0;
         U.D.assert(!options.id || v, '车辆不存在');
         this.setData(
           v
-            ? { form: Object.assign({}, v), typeIndex: U.D.TYPES.findIndex(t => t.id === v.type) }
-            : { 'form.baseDate': today }
+            ? {
+                form: Object.assign({}, v, {
+                  batteryKwh: v.batteryKwh100 == null ? '' : (v.batteryKwh100 / 100).toFixed(2),
+                }),
+                typeIndex,
+                charge: U.D.TYPES[typeIndex].charge,
+              }
+            : { 'form.baseDate': today, charge: U.D.TYPES[0].charge }
         );
         this.setData({ today, ready: true });
         wx.setNavigationBarTitle({ title: v ? '编辑车辆' : '添加车辆' });
@@ -30,7 +38,13 @@ Page(
     },
     typeChange(e) {
       const i = Number(e.detail.value);
-      this.setData({ typeIndex: i, 'form.type': U.D.TYPES[i].id, error: '', errorField: '' });
+      this.setData({
+        typeIndex: i,
+        'form.type': U.D.TYPES[i].id,
+        charge: U.D.TYPES[i].charge,
+        error: '',
+        errorField: '',
+      });
     },
     save() {
       if (this.data.saving || !this.data.ready) return;
@@ -39,6 +53,7 @@ Page(
         车辆昵称: 'name',
         里程日期: 'baseDate',
         累计里程: 'baseMileage',
+        电池容量: 'batteryKwh',
       });
       if (id) U.saved();
       else this.setData({ saving: false });

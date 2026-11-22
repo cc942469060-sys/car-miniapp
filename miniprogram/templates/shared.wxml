@@ -8,8 +8,8 @@
   <view class="empty"><view class="empty-title">每一段里程，都心中有数</view><view class="muted">添加你的第一辆车，开始记录加油、充电与保养。</view><button class="primary" bindtap="addVehicle">＋ 添加车辆</button></view>
 </template>
 <template name="records">
-  <view wx:for="{{records}}" wx:key="id" class="row" data-id="{{item.id}}" bindtap="openRecord" aria-role="button" aria-label="{{item.title}} {{item.date}} {{item.amount}}元，查看详情">
-    <view class="symbol">{{item.symbol}}</view><view class="row-main"><view class="row-title">{{item.title}}<text wx:if="{{item.quantity}}"> · {{item.quantity}} {{item.unit}}</text></view><view class="row-meta">{{item.date}}<text wx:if="{{item.mileage !== null}}"> · {{item.mileage}} km</text></view><view class="row-meta" wx:if="{{item.detail}}">{{item.detail}}</view><view class="row-meta" wx:if="{{item.note}}">{{item.note}}</view></view><view class="row-price">¥{{item.amount}}</view>
+  <view wx:for="{{records}}" wx:key="id" class="row" data-id="{{item.id}}" bindtap="openRecord" aria-role="button" aria-label="{{item.title}} {{item.date}} {{item.priceText}}元，查看详情">
+    <view class="symbol">{{item.symbol}}</view><view class="row-main"><view class="row-title">{{item.title}}<text wx:if="{{item.quantity}}"> · {{item.quantity}} {{item.unit}}</text><text class="tag" wx:if="{{item.confidence}}">{{item.confidence}}</text></view><view class="row-meta">{{item.date}}<text wx:if="{{item.mileage !== null}}"> · {{item.mileage}} km</text></view><view class="row-meta" wx:if="{{item.detail}}">{{item.detail}}</view><view class="row-meta" wx:if="{{item.note}}">{{item.note}}</view></view><view class="row-price">{{item.priceText}}</view>
   </view>
 </template>
 <template name="undo-notice">

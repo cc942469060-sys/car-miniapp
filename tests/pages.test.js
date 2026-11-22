@@ -785,7 +785,7 @@ test('所有页面含已绑定事件方法，导入模板可解析，空数据�
       result += '\n' + sources(path.resolve(path.dirname(file), m[1]));
     return result;
   }
-  for (const name of ['home', 'ledger', 'care', 'garage', 'stats', 'vehicle', 'entry', 'plan']) {
+  for (const name of ['home', 'ledger', 'care', 'garage', 'stats', 'vehicle', 'entry', 'plan', 'settle', 'homecharge']) {
     const p = loadPage(name);
     if (!['entry', 'plan'].includes(name)) assert.equal(p.data.error, '');
     const source = sources(path.resolve(__dirname, '../miniprogram/pages', name, 'index.wxml'));
@@ -793,3 +793,112 @@ test('所有页面含已绑定事件方法，导入模板可解析，空数据�
       assert.equal(typeof p[m[1]], 'function', name + ' missing ' + m[1]);
   }
 });
+// 家充需要电价与电表类型，先在家充设置页配好再记账。
+function setMeter(page, meter) {
+  page.pickMeter({ currentTarget: { dataset: { value: meter } } });
+}
+function addPrices(page, from, periods) {
+  page.addTariff({ currentTarget: { dataset: {} } });
+  page.setData({ 'form.from': from, 'form.periods': periods });
+  page.saveTariff();
+}
+test('家充待对账：预估计入、首页提醒、账单分摊后变实际', () => {
+  const id = createCar('ev'),
+    v = loadPage('vehicle', { id });
+  v.setData({ 'form.batteryKwh': '63' });
+  v.save();
+  const hc = loadPage('homecharge');
+  setMeter(hc, 'dedicated');
+  assert.equal(hc.data.meter, 'dedicated');
+  hc.setData({ chargerKw: '7' });
+  hc.savePower();
+  addPrices(hc, '2025-01-01', [
+    { start: '00:00', label: 'valley', labelIndex: 0, price: '0.3000' },
+    { start: '07:00', label: 'flat', labelIndex: 1, price: '0.6000' },
+    { start: '23:00', label: 'valley', labelIndex: 0, price: '0.3000' },
+  ]);
+  assert.equal(raw.home.tariffs.length, 1);
+  assert.match(hc.data.kRows[0].k, /0\.70/);
+  const entry = loadPage('entry', { vehicleId: id });
+  entry.toggleHome({ detail: { value: true } });
+  assert.equal(entry.data.form.settle, 'pending');
+  entry.setData({
+    'form.date': '2025-11-20',
+    'form.mileage': '1200',
+    'form.startTime': '22:00',
+    'form.socBefore': '30',
+    'form.socAfter': '80',
+  });
+  entry.refresh({});
+  assert.equal(entry.data.preview.quantity, '35.00');
+  entry.save();
+  assert.equal(entry.data.error, '');
+  const record = raw.records[0];
+  assert.equal(record.settle, 'pending');
+  assert.equal(record.quantity100, null);
+  assert.equal(record.cents, null);
+  assert.equal(record.estQuantity100, 3500);
+  assert.equal(record.estCents, 1260);
+  assert.equal(record.endTime, '03:00');
+  assert.equal(record.endEstimated, true);
+  const home = loadPage('home');
+  assert.equal(home.data.home.pending, 1);
+  assert.equal(home.data.pendingAmount, '12.60');
+  const before = loadPage('ledger');
+  before.monthChange({ detail: { value: '2025-11' } });
+  assert.equal(before.data.amount, '12.60');
+  assert.equal(before.data.estimated, '12.60');
+  home.viewSettle();
+  assert.match(navigation.at(-1), /pages\/settle/);
+  const settle = loadPage('settle');
+  assert.equal(settle.data.pending.length, 1);
+  assert.equal(settle.data.pendingAmount, '12.60');
+  settle.openNewBill();
+  settle.setData({ 'form.from': '2025-11-20', 'form.to': '2025-11-21', 'form.quantity': '35.00' });
+  settle.previewBill();
+  assert.equal(settle.data.error, '');
+  assert.equal(settle.data.preview.rows.length, 1);
+  settle.saveBill();
+  assert.equal(settle.data.error, '');
+  assert.equal(raw.bills.length, 1);
+  assert.equal(raw.records[0].settle, 'bill');
+  assert.equal(raw.records[0].quantity100, 3500);
+  assert.equal(raw.records[0].cents, 1260);
+  const ledger = loadPage('ledger');
+  ledger.monthChange({ detail: { value: '2025-11' } });
+  assert.equal(ledger.data.estimated, '');
+  assert.equal(ledger.data.amount, '12.60');
+});
+test('共用总表按预估入账，不能录账单；关闭开关回到手动', () => {
+  const id = createCar('ev');
+  const hc = loadPage('homecharge');
+  setMeter(hc, 'shared');
+  addPrices(hc, '2025-01-01', [{ start: '00:00', label: 'flat', labelIndex: 1, price: '0.6000' }]);
+  const entry = loadPage('entry', { vehicleId: id });
+  entry.toggleHome({ detail: { value: true } });
+  assert.equal(entry.data.form.settle, 'estimate');
+  entry.setData({
+    'form.date': '2025-11-20',
+    'form.mileage': '1200',
+    'form.startTime': '22:00',
+    'form.estQuantity': '10',
+  });
+  entry.save();
+  assert.equal(entry.data.error, '');
+  assert.equal(raw.records[0].settle, 'estimate');
+  assert.equal(raw.records[0].quantity100, 1000);
+  assert.equal(raw.records[0].cents, 600);
+  const settle = loadPage('settle');
+  assert.equal(settle.data.meter, 'shared');
+  assert.equal(settle.data.pending.length, 0);
+  const edit = loadPage('entry', { id: raw.records[0].id });
+  edit.toggleSettle({ detail: { value: false } });
+  assert.equal(edit.data.form.settle, 'manual');
+  edit.setData({ 'form.amount': '8.00', 'form.quantity': '10' });
+  edit.save();
+  assert.equal(edit.data.error, '');
+  assert.equal(raw.records.length, 1);
+  assert.equal(raw.records[0].settle, 'manual');
+  assert.equal(raw.records[0].cents, 800);
+});
+

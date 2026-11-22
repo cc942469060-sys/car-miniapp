@@ -1,10 +1,20 @@
 const D = require('./domain');
+const C = require('./charging');
 const KEY = 'car-miniapp:v1',
   APP = 'car-miniapp',
-  VERSION = 1;
+  VERSION = 2,
+  DEFAULT_HOME = { meter: '', chargerKw100: 700, tariffs: [] };
 const clone = x => JSON.parse(JSON.stringify(x));
 function empty() {
-  return { version: VERSION, vehicles: [], records: [], plans: [], currentId: '' };
+  return {
+    version: VERSION,
+    vehicles: [],
+    records: [],
+    plans: [],
+    currentId: '',
+    home: clone(DEFAULT_HOME),
+    bills: [],
+  };
 }
 // Brings stored or backed-up data to the current schema in memory; unknown data is reported, never rewritten.
 function migrate(raw, label, hint) {
@@ -13,9 +23,40 @@ function migrate(raw, label, hint) {
     label + '格式不兼容' + hint
   );
   D.assert(raw.version <= VERSION, label + '来自更新版本的小程序，与当前版本不兼容，请先更新小程序');
-  // Upgrade older schemas here one version at a time, e.g. if(raw.version===1){…;raw.version=2;}
+  // Upgrade older schemas here one version at a time. Version 2 adds home charging and its bills; every existing
+  // record stays a non-home charge, so statistics, consumption and CSV rows are unchanged by the upgrade.
+  if (raw.version === 1) {
+    raw.version = 2;
+    raw.home = clone(DEFAULT_HOME);
+    raw.bills = [];
+    raw.vehicles = (raw.vehicles || []).map(v => Object.assign({ batteryKwh100: null }, v));
+    raw.records = (raw.records || []).map(r =>
+      Object.assign(
+        {
+          home: false,
+          settle: '',
+          startTime: '',
+          endTime: '',
+          endEstimated: false,
+          socBefore: null,
+          estQuantity100: null,
+          estCents: null,
+          estMethod: '',
+          estK10000: null,
+          alloc: [],
+        },
+        r
+      )
+    );
+  }
   D.assert(
-    Array.isArray(raw.vehicles) && Array.isArray(raw.records) && Array.isArray(raw.plans),
+    Array.isArray(raw.vehicles) &&
+      Array.isArray(raw.records) &&
+      Array.isArray(raw.plans) &&
+      Array.isArray(raw.bills) &&
+      raw.home &&
+      typeof raw.home === 'object' &&
+      Array.isArray(raw.home.tariffs),
     label + '格式不兼容' + hint
   );
   return raw;
@@ -36,7 +77,15 @@ function normalizeBackup(raw) {
     }
   };
   const vehicles = s.vehicles.map((v, i) =>
-    item('辆车', i, v, () => D.normalizeVehicle(v, { id: v.id, archived: v.archived === true }, []))
+    item('辆车', i, v, () =>
+      D.normalizeVehicle(
+        Object.assign({}, v, {
+          batteryKwh: v.batteryKwh100 == null ? '' : (v.batteryKwh100 / 100).toFixed(2),
+        }),
+        { id: v.id, archived: v.archived === true },
+        []
+      )
+    )
   );
   const plans = s.plans.map((p, i) =>
     item('个计划', i, p, () => {
@@ -52,15 +101,39 @@ function normalizeBackup(raw) {
       const v = vehicles.find(x => x.id === r.vehicleId);
       D.assert(v, '所属车辆不存在');
       D.assert(
-        Number.isSafeInteger(r.cents) && (!['fuel', 'charge'].includes(r.kind) || Number.isSafeInteger(r.quantity100)),
+        (r.cents == null || Number.isSafeInteger(r.cents)) &&
+          (!['fuel', 'charge'].includes(r.kind) || r.quantity100 == null || Number.isSafeInteger(r.quantity100)),
         '金额或补能量格式错误'
       );
       // Archived vehicles keep their history, so their records are checked as if the vehicle were active.
       const n = D.normalizeRecord(D.recordInput(r), Object.assign({}, v, { archived: false }));
       D.assert(!n.planId || plans.some(p => p.id === n.planId && p.vehicleId === v.id), '关联计划不存在');
+      // Allocation is always recomputed from the bills after restoring, never trusted from the file.
+      n.alloc = [];
       return n;
     })
   );
+  const meter = ['', 'dedicated', 'shared'].includes(s.home.meter) ? s.home.meter : null;
+  D.assert(meter !== null, '备份中的家充电表类型无效');
+  D.assert(!s.bills.length || meter === 'dedicated', '备份中的家充数据不一致，请检查电表类型');
+  D.assert(
+    Number.isSafeInteger(s.home.chargerKw100) && s.home.chargerKw100 >= 100 && s.home.chargerKw100 <= 5000,
+    '备份中的充电桩功率无效'
+  );
+  const tariffs = [];
+  s.home.tariffs.forEach((t, i) =>
+    item('个电价版本', i, t, () => {
+      tariffs.push(C.normalizeTariff(t, tariffs, null));
+    })
+  );
+  const bills = [];
+  s.bills.forEach((b, i) =>
+    item('张账单', i, b, () => {
+      bills.push(C.normalizeBill(b, bills, null, { meter }));
+    })
+  );
+  D.assert(!bills.length || meter === 'dedicated', '备份中的家充数据不一致，请检查电表类型');
+  const home = { meter, chargerKw100: s.home.chargerKw100, tariffs };
   vehicles.forEach(v => {
     try {
       D.validateTimeline(v, records);
@@ -71,7 +144,13 @@ function normalizeBackup(raw) {
   const currentId = vehicles.some(v => v.id === s.currentId)
     ? s.currentId
     : (vehicles.find(v => !v.archived) || vehicles[0]).id;
-  return { version: VERSION, vehicles, records, plans, currentId };
+  const state = { version: VERSION, vehicles, records, plans, currentId, home, bills };
+  try {
+    C.settleAll(state);
+  } catch (e) {
+    D.fail('备份中的家充数据无效' + (e.user ? '：' + e.message : ''));
+  }
+  return state;
 }
 function createStore(storage) {
   function read() {
@@ -158,6 +237,7 @@ function createStore(storage) {
         s.vehicles = s.vehicles.filter(v => v.id !== id);
         s.records = s.records.filter(r => r.vehicleId !== id);
         s.plans = s.plans.filter(p => p.vehicleId !== id);
+        C.settleAll(s);
         if (s.currentId === id) s.currentId = (s.vehicles.find(v => !v.archived) || s.vehicles[0] || {}).id || '';
         return removed;
       });
@@ -181,16 +261,66 @@ function createStore(storage) {
         const old = s.records.find(r => r.id === input.id);
         D.assert(!input.id || old, '记录不存在');
         const v = s.vehicles.find(x => x.id === input.vehicleId);
-        const r = D.normalizeRecord(Object.assign({}, input, { id: input.id || uid('r') }), v);
+        // Estimate first: an estimated record has to carry its quantity and amount into validation.
+        const draft = Object.assign({}, input, { id: input.id || uid('r') });
+        if (draft.kind === 'charge' && draft.home === true && draft.settle !== 'bill') {
+          const k = C.homeK(v, s.records, s.bills).k;
+          try {
+            const est = C.estimateHomeCharge(draft, v, k, s.home);
+            Object.assign(draft, {
+              estQuantity100: est.estQuantity100,
+              estCents: est.estCents,
+              estMethod: est.estMethod,
+              estK10000: est.estK10000,
+              endTime: est.endTime,
+              endEstimated: est.endEstimated,
+            });
+            if (draft.settle === 'estimate') {
+              draft.quantity = (est.estQuantity100 / 100).toFixed(2);
+              draft.amount = D.money(est.estCents);
+            }
+          } catch (e) {
+            if (draft.settle !== 'manual') throw e;
+          }
+        }
+        const r = D.normalizeRecord(draft, v);
         D.assert(!old || old.vehicleId === v.id, '不能移动记录到其他车辆');
         if (r.planId)
           D.assert(
             s.plans.some(p => p.id === r.planId && p.vehicleId === v.id),
             '关联计划不存在'
           );
+        // The meter type decides how a home charge is booked; a pending charge on a shared meter is booked as estimated.
+        if (r.home && r.settle !== 'bill') {
+          if (r.settle === 'pending' && s.home.meter === 'shared') r.settle = 'estimate';
+          if (r.settle === 'estimate' && s.home.meter === 'dedicated') r.settle = 'pending';
+          if (r.settle === 'pending' || r.settle === 'estimate')
+            D.assert(s.home.meter, '请先在家充设置里选择电表类型');
+        }
+        // Home charges keep an estimate next to the real values, so a bill can fill the gap later.
+        if (r.home && r.settle !== 'bill') {
+          if (r.settle === 'estimate' && r.estQuantity100 && r.estCents != null) {
+            r.quantity100 = r.estQuantity100;
+            r.cents = r.estCents;
+          }
+          if (r.settle === 'pending') {
+            r.quantity100 = null;
+            r.cents = null;
+          }
+          const window = C.chargeWindow(r);
+          if (window) {
+            const clash = s.records.some(x => {
+              if (x.id === r.id || x.vehicleId !== v.id || !x.home || x.kind !== 'charge') return false;
+              const other = C.chargeWindow(x);
+              return other && C.windowOverlap(window, other) > 0;
+            });
+            D.assert(!clash, '这段充电时间与已记录的家充时段重叠，请核对');
+          }
+        }
         if (old) s.records[s.records.indexOf(old)] = r;
         else s.records.push(r);
         D.validateTimeline(v, s.records);
+        if (r.home) C.settleAll(s);
         return r.id;
       });
     },
@@ -203,6 +333,7 @@ function createStore(storage) {
           '车辆不存在或已归档'
         );
         s.records = s.records.filter(r => r.id !== id);
+        if (old.home) C.settleAll(s);
         return old;
       });
     },
@@ -219,7 +350,88 @@ function createStore(storage) {
           );
         s.records.push(r);
         D.validateTimeline(v, s.records);
+        if (r.home) C.settleAll(s);
         return r.id;
+      });
+    },
+    saveHome(input) {
+      return change(s => {
+        const home = C.normalizeHome(input);
+        D.assert(
+          !(home.meter === 'shared' && s.bills.length),
+          '已录过账单，不能切换到共用总表；请先删除账单'
+        );
+        home.tariffs = s.home.tariffs;
+        s.records.forEach(r => {
+          if (!r.home) return;
+          if (home.meter === 'dedicated' && r.settle === 'estimate') {
+            r.settle = 'pending';
+            r.quantity100 = null;
+            r.cents = null;
+          }
+          if (home.meter === 'shared' && r.settle === 'pending') {
+            D.assert(r.estQuantity100 && r.estCents != null, '有家充记录缺少预估，无法按预估入账，请先编辑该记录');
+            r.settle = 'estimate';
+            r.quantity100 = r.estQuantity100;
+            r.cents = r.estCents;
+          }
+        });
+        s.home = home;
+        C.settleAll(s);
+      });
+    },
+    saveTariff(input) {
+      return change(s => {
+        const existing = input.id ? s.home.tariffs.find(t => t.id === input.id) : null;
+        D.assert(!input.id || existing, '电价版本不存在');
+        const tariff = C.normalizeTariff(
+          Object.assign({}, input, { id: input.id || uid('t') }),
+          s.home.tariffs,
+          existing
+        );
+        if (existing) s.home.tariffs[s.home.tariffs.indexOf(existing)] = tariff;
+        else s.home.tariffs.push(tariff);
+        s.home.tariffs.sort((a, b) => a.from.localeCompare(b.from));
+        C.settleAll(s);
+        return tariff.id;
+      });
+    },
+    deleteTariff(id) {
+      return change(s => {
+        D.assert(s.home.tariffs.some(t => t.id === id), '电价版本不存在');
+        const rest = s.home.tariffs.filter(t => t.id !== id);
+        s.records.forEach(r => {
+          if (!r.home || (r.settle !== 'pending' && r.settle !== 'estimate')) return;
+          C.coveredDates(r).forEach(date =>
+            D.assert(C.tariffFor(date, rest), '删除后，有家充记录将没有适用电价，请先调整记录')
+          );
+        });
+        s.bills.forEach(b => {
+          if (b.cents != null) return;
+          for (let date = b.from; date <= b.to; date = D.addDays(date, 1))
+            D.assert(C.tariffFor(date, rest), '删除后，有账单将没有适用电价，请先调整账单');
+        });
+        s.home.tariffs = rest;
+        C.settleAll(s);
+      });
+    },
+    saveBill(input) {
+      return change(s => {
+        const existing = s.bills.find(b => b.id === input.id);
+        D.assert(!input.id || existing, '账单不存在');
+        const b = C.normalizeBill(Object.assign({}, input, { id: input.id || uid('b') }), s.bills, existing, s.home);
+        if (existing) s.bills[s.bills.indexOf(existing)] = b;
+        else s.bills.push(b);
+        s.bills.sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
+        C.settleAll(s);
+        return b.id;
+      });
+    },
+    deleteBill(id) {
+      return change(s => {
+        D.assert(s.bills.some(b => b.id === id), '账单不存在');
+        s.bills = s.bills.filter(b => b.id !== id);
+        C.settleAll(s);
       });
     },
     savePlan(input) {

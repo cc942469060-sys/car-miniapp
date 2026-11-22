@@ -17,9 +17,19 @@ Page(
             ),
             backupAt: (B.backupState() || {}).at || '',
             recordCount: x.s.records.length,
+            home: (() => {
+              const h = U.homeSummary(x.s, x.v);
+              return Object.assign(h, { pendingAmount: U.D.money(h.pendingCents) });
+            })(),
           })
         );
       });
+    },
+    openHomeCharge() {
+      wx.navigateTo({ url: '/pages/homecharge/index' });
+    },
+    openSettle() {
+      wx.navigateTo({ url: '/pages/settle/index' });
     },
     select(e) {
       U.guard(this, () => {

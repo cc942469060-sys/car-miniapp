@@ -279,7 +279,8 @@ test('单价由金额和数量反推，取能还原金额的最短小数；新�
       const s = store.read();
       return D.recordDefaults(s.vehicles[0], s.records, kind);
     };
-  assert.deepEqual(defaults('fuel'), { mileage: '1000', price: '', note: '', socAfter: '' });
+  const empty = { mileage: '1000', price: '', note: '', socAfter: '', home: false, startTime: '', socBefore: '' };
+  assert.deepEqual(defaults('fuel'), empty);
   record(store, id, { note: '92 号汽油' });
   record(store, id, { date: '2025-01-05', mileage: '1300', amount: '300', quantity: '40', note: '95 号汽油' });
   record(store, id, {
@@ -292,9 +293,33 @@ test('单价由金额和数量反推，取能还原金额的最短小数；新�
     note: '家充',
   });
   // The latest of each kind counts, and the mileage is the latest reading of any kind.
-  assert.deepEqual(defaults('fuel'), { mileage: '1300', price: '7.50', note: '95 号汽油', socAfter: '' });
-  assert.deepEqual(defaults('charge'), { mileage: '1300', price: '0.617', note: '家充', socAfter: '80' });
-  assert.deepEqual(defaults('service'), { mileage: '', price: '', note: '', socAfter: '' });
+  assert.deepEqual(defaults('fuel'), {
+    mileage: '1300',
+    price: '7.50',
+    note: '95 号汽油',
+    socAfter: '',
+    home: false,
+    startTime: '',
+    socBefore: '',
+  });
+  assert.deepEqual(defaults('charge'), {
+    mileage: '1300',
+    price: '0.617',
+    note: '家充',
+    socAfter: '80',
+    home: false,
+    startTime: '',
+    socBefore: '',
+  });
+  assert.deepEqual(defaults('service'), {
+    mileage: '',
+    price: '',
+    note: '',
+    socAfter: '',
+    home: false,
+    startTime: '',
+    socBefore: '',
+  });
 });
 test('计划按剩余量占提前量的比例排序，并给出剩余天数与公里数', () => {
   const p = D.normalizePlan({ id: 'p', name: '保养', dueMileage: 2000, leadKm: 500 }, 'v'),
@@ -360,7 +385,7 @@ test('损坏、不兼容或不完整的备份被拒绝并说明原因，本机�
   const cases = [
     [null, /不是车小记/],
     [{ ...backup, app: 'other' }, /不是车小记/],
-    [{ ...backup, version: 2 }, /更新版本/],
+    [{ ...backup, version: 3 }, /更新版本/],
     [{ ...backup, plans: undefined }, /格式不兼容/],
     [{ ...backup, vehicles: [] }, /没有车辆/],
     [{ ...backup, records: [r[0], r[0]] }, /第 2 条记录.*重复/],
@@ -394,7 +419,7 @@ test('恢复写入失败不改数据；本机数据损坏时提示并仍可从�
   assert.equal(writes, 1);
   assert.equal(broken.read().vehicles.length, 2);
   assert.throws(
-    () => createStore({ get: () => ({ version: 2, vehicles: [], records: [], plans: [] }), set: () => {} }).read(),
+    () => createStore({ get: () => ({ version: 3, vehicles: [], records: [], plans: [] }), set: () => {} }).read(),
     /更新版本.*请先更新小程序/
   );
 });
@@ -708,11 +733,11 @@ test('CSV 导出带 BOM 与表头，按日期排序，转义逗号和引号，�
   assert.equal(csv.charCodeAt(0), 0xfeff);
   assert.equal(
     lines[0],
-    '车辆,日期,类型,类别,金额(元),累计里程(km),补能量,单位,单价(元),本次加满,充电后电量(%),关联计划,备注'
+    '车辆,日期,类型,类别,金额(元),累计里程(km),补能量,单位,单价(元),本次加满,充电后电量(%),关联计划,备注,家充,充电时段,充电前电量(%),数据来源,预估电量(kWh),预估金额(元)'
   );
-  assert.equal(lines[1], '"通勤,车",2025-01-02,加油,,300.00,1100,40.00,L,7.50,是,,,"加""满"""');
-  assert.equal(lines[2], '"通勤,车",2025-01-05,充电,,20.00,1200,30.00,kWh,0.67,,80,,');
-  assert.equal(lines[3], `"通勤,车",2025-02-01,其他费用,保险,3800.00,1500,,,,,,车险续期,'=1+1`);
+  assert.equal(lines[1], '"通勤,车",2025-01-02,加油,,300.00,1100,40.00,L,7.50,是,,,"加""满""",,,,,,');
+  assert.equal(lines[2], '"通勤,车",2025-01-05,充电,,20.00,1200,30.00,kWh,0.67,,80,,,,,,,,');
+  assert.equal(lines[3], `"通勤,车",2025-02-01,其他费用,保险,3800.00,1500,,,,,,车险续期,'=1+1,,,,,,`);
   assert.deepEqual(lines.slice(4), ['']);
 });
 test('不兼容缓存必须保留，不能静默重置', () => {

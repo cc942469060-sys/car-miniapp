@@ -67,7 +67,11 @@ Page(
             year,
             yearAmount: U.D.yuan(yearStats.total),
             yearCount: yearStats.count,
-            totalAmount: U.D.yuan(records.reduce((s, r) => s + r.cents, 0)),
+            totalAmount: U.D.yuan(records.reduce((s, r) => s + U.D.effectiveCents(r), 0)),
+            estimated: (() => {
+              const cents = records.filter(r => r.date.slice(0, 7) === month && r.cents == null).reduce((s, r) => s + U.D.effectiveCents(r), 0);
+              return cents ? U.D.money(cents) : '';
+            })(),
             firstDate: records.reduce((a, r) => (!a || r.date < a ? r.date : a), ''),
             trend: bars(U.D.monthlyTrend(records, month), 'cents'),
             miles: miles.dailyKm

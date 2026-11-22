@@ -1,6 +1,16 @@
 const U = require('../../utils/ui');
+const C = require('../../utils/charging');
 // Validation message label → form field, for marking the field that needs fixing.
-const FIELDS = { 记录日期: 'date', 累计里程: 'mileage', 金额: 'amount', 补能量: 'quantity', 充电后电量: 'socAfter' };
+const FIELDS = {
+  记录日期: 'date',
+  累计里程: 'mileage',
+  金额: 'amount',
+  补能量: 'quantity',
+  充电后电量: 'socAfter',
+  充电前电量: 'socBefore',
+  开始充电时间: 'startTime',
+  充满时间: 'endTime',
+};
 Page(
   Object.assign({}, U.common, {
     data: {
@@ -16,9 +26,15 @@ Page(
         full: false,
         gap: false,
         socAfter: '',
+        socBefore: '',
         confirmed: false,
         complete: false,
         planId: '',
+        home: false,
+        settle: '',
+        startTime: '',
+        endTime: '',
+        estQuantity: '',
       },
       today: '',
       mileageHint: '',
@@ -30,6 +46,12 @@ Page(
       autoAmount: true,
       readingMileage: '',
       readingDate: '',
+      homeReady: false,
+      meterText: '',
+      kText: '',
+      preview: null,
+      allocRows: [],
+      locked: false,
       error: '',
       saving: false,
       ready: false,
@@ -67,6 +89,8 @@ Page(
           date: today,
           full: !!(lastFuel && lastFuel.full),
           confirmed: !!(lastCharge && lastCharge.confirmed),
+          home: false,
+          settle: '',
         });
         if (record)
           form = Object.assign(form, U.D.recordInput(record), {
@@ -80,6 +104,10 @@ Page(
             U.D.planRecordDefaults(plan, s.records)
           );
         else form = Object.assign(form, this.defaults[form.kind]);
+        if (form.kind === 'charge' && form.home && !record) form.settle = this.settleFor(true);
+        this.s = s;
+        this.v = v;
+        this.kInfo = C.homeK(v, s.records, s.bills);
         this.setData({
           vehicle: v,
           kinds,
@@ -93,10 +121,72 @@ Page(
           readingMileage: String(last.mileage),
           readingDate: last.date,
           socHint: lastCharge && lastCharge.socAfter != null ? `上次充到 ${lastCharge.socAfter}%` : '如 80',
+          homeReady: !!s.home.meter,
+          meterText:
+            s.home.meter === 'dedicated' ? '独立电表' : s.home.meter === 'shared' ? '共用总表' : '未设置电表类型',
+          kText: this.kText(),
+          locked: !!(record && record.home && record.settle === 'bill'),
+          allocRows: record && record.home ? this.allocRows(record) : [],
           ready: true,
         });
+        this.refresh();
         wx.setNavigationBarTitle({ title: record ? '记录详情' : '记一笔' });
       });
+    },
+    // 独立电表先把家充挂成待对账；共用总表按预估入账；没设置电表时只能手填实际值。
+    settleFor(on) {
+      if (!on) return '';
+      const meter = this.s && this.s.home ? this.s.home.meter : '';
+      return meter === 'dedicated' ? 'pending' : meter === 'shared' ? 'estimate' : 'manual';
+    },
+    kText() {
+      const info = this.kInfo;
+      if (!info || !info.k) return '';
+      const per = (info.k / 100).toFixed(2);
+      if (info.samples >= 3)
+        return `每 1% ≈ ${per} kWh（近 ${info.samples} 张账单校准${info.mae == null ? '' : `，平均偏差 ${(info.mae * 100).toFixed(0)}%`}）`;
+      return `每 1% ≈ ${per} kWh（电池 ${(this.v.batteryKwh100 / 100).toFixed(0)} kWh、效率 90%）`;
+    },
+    // Which bill paid for which part of a settled home charge, shown read-only when editing it.
+    allocRows(record) {
+      return (record.alloc || []).map(a => {
+        const b = this.s.bills.find(x => x.id === a.billId);
+        return {
+          id: a.billId,
+          range: b ? `${b.from} ~ ${b.to}` : '账单已删除',
+          quantity: (a.quantity100 / 100).toFixed(2),
+          amount: U.D.money(a.cents),
+        };
+      });
+    },
+    // Live estimate for the entry form, using the same function the store applies when saving.
+    refresh(patch) {
+      const form = Object.assign({}, this.data.form, patch || {});
+      if (form.kind !== 'charge' || !form.home || !this.v || !this.s) {
+        return this.setData({ preview: null });
+      }
+      try {
+        const est = C.estimateHomeCharge(form, this.v, this.kInfo ? this.kInfo.k : null, this.s.home),
+          byLabel = est.slice.byLabel,
+          parts = C.LABEL_IDS.filter(l => byLabel[l]).map(
+            l => `${C.LABELS[l]} ${(byLabel[l].quantity100 / 100).toFixed(2)} kWh`
+          );
+        this.est = est;
+        this.setData({
+          preview: {
+            text: parts.join(' · '),
+            quantity: (est.estQuantity100 / 100).toFixed(2),
+            amount: U.D.money(est.estCents),
+            end: `${est.endTime}${est.endEstimated ? '（按功率推算）' : ''}`,
+            method: { soc: '按充电前后电量估算', power: '按功率与时长估算', typed: '按填写的估计电量' }[est.estMethod],
+            start: form.startTime,
+          },
+        });
+      } catch (e) {
+        this.est = null;
+        if (!e.user) console.error(e);
+        this.setData({ preview: e.user ? { error: e.message } : null });
+      }
     },
     // A new record takes on the defaults of the kind it switches to, except in fields typed by hand.
     pickKind(e) {
@@ -108,9 +198,11 @@ Page(
         Object.keys(d).forEach(field => {
           if (!this.typed[field]) patch['form.' + field] = d[field];
         });
+        patch['form.settle'] = kind === 'charge' ? this.settleFor(!!d.home) : '';
         Object.assign(patch, this.fill(patch));
       }
       this.setData(patch);
+      this.refresh(patch);
     },
     // At the unit price, a typed amount fills in the quantity and a typed quantity fills in an empty amount. A filled-in
     // value follows the typed ones until it is typed by hand; clearing it hands it back.
@@ -124,6 +216,7 @@ Page(
       if (field === 'amount' || field === 'price' || field === 'quantity')
         Object.assign(patch, this.fill(patch, field));
       this.setData(patch);
+      if (/^(startTime|endTime|socBefore|socAfter|estQuantity|amount|quantity)$/.test(field)) this.refresh(patch);
     },
     // The quantity and amount to fill in once `patch` applies. Only typed values are used, so a filled-in value never
     // feeds the other one, and the field being typed is never refilled under the cursor.
@@ -145,6 +238,26 @@ Page(
     pickCategory(e) {
       this.setData({ 'form.category': e.currentTarget.dataset.value, error: '', errorField: '' });
     },
+    // 家充 once on stays on for the next charge, as most people charge at home every night.
+    toggleHome(e) {
+      const home = e.detail.value,
+        patch = { 'form.home': home, 'form.settle': this.settleFor(home) };
+      if (!home) Object.assign(patch, { 'form.startTime': '', 'form.endTime': '', 'form.socBefore': '' });
+      this.setData(patch);
+      this.refresh(patch);
+    },
+    // Off means the values were read from the charger and typed in by hand (actual, no estimate).
+    toggleSettle(e) {
+      const on = e.detail.value,
+        meter = this.s.home.meter,
+        settle = on ? (meter === 'shared' ? 'estimate' : 'pending') : 'manual',
+        patch = { 'form.settle': settle };
+      this.setData(patch);
+      this.refresh(patch);
+    },
+    goHomeCharge() {
+      wx.navigateTo({ url: '/pages/homecharge/index' });
+    },
     // Likely typos get a confirmation rather than a block; validation errors are shown next to their field.
     save() {
       if (this.data.saving || this.confirming || !this.data.ready) return;
@@ -153,10 +266,41 @@ Page(
         () => {
           const s = U.getStore().read(),
             v = s.vehicles.find(x => x.id === this.data.form.vehicleId),
+            input = Object.assign({}, this.data.form, { id: this.data.form.id || '' }),
+            est =
+              input.home && input.settle !== 'bill'
+                ? (() => {
+                    try {
+                      return C.estimateHomeCharge(
+                        input,
+                        v,
+                        this.kInfo ? this.kInfo.k : C.homeK(v, s.records, s.bills).k,
+                        s.home
+                      );
+                    } catch (e) {
+                      if (input.settle === 'manual') return null;
+                      throw e;
+                    }
+                  })()
+                : null,
             warnings = U.D.recordWarnings(
-              U.D.normalizeRecord(Object.assign({}, this.data.form, { id: this.data.form.id || '' }), v),
+              U.D.normalizeRecord(
+                // The store fills the same estimate in again when saving; this copy is for the warnings only.
+                est
+                  ? Object.assign(input, {
+                      estQuantity100: est.estQuantity100,
+                      estCents: est.estCents,
+                      estMethod: est.estMethod,
+                      estK10000: est.estK10000,
+                      endTime: est.endTime,
+                      endEstimated: est.endEstimated,
+                    })
+                  : input,
+                v
+              ),
               v,
-              s.records
+              s.records,
+              { home: s.home, k: this.kInfo ? this.kInfo.k : null }
             );
           if (!warnings.length) return this.commit();
           // One confirmation at a time: a second tap before the dialog shows must not open another one.

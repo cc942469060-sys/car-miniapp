@@ -1,17 +1,35 @@
 const D = require('./domain');
+const C = require('./charging');
 const { getStore } = require('./store');
 // `rates` (from intervalRates) adds the consumption of the interval a record closes; unit price comes from the record itself.
-function recordView(r, rates) {
+// `state` lets a home charge show whether its value is actual, shared between bills, or still estimated.
+function recordView(r, rates, state) {
   const unit = r.kind === 'fuel' ? 'L' : 'kWh',
-    price = r.quantity100 && r.cents ? `¥${(r.cents / r.quantity100).toFixed(2)}/${unit}` : '';
-  return Object.assign({}, r, {
-    title: r.kind === 'other' && r.category && r.category !== '其他' ? r.category : D.KINDS[r.kind],
-    amount: D.yuan(r.cents),
-    quantity: r.quantity100 ? (r.quantity100 / 100).toFixed(2) : '',
-    unit,
-    symbol: { fuel: '油', charge: '电', service: '养', other: '账' }[r.kind],
-    detail: [price, rates && rates[r.id]].filter(Boolean).join(' · '),
-  });
+    cents = r.cents == null ? r.estCents : r.cents,
+    quantity100 = r.quantity100 == null ? r.estQuantity100 : r.quantity100,
+    price = r.quantity100 && r.cents ? `¥${(r.cents / r.quantity100).toFixed(2)}/${unit}` : '',
+    view = Object.assign({}, r, {
+      title: r.kind === 'other' && r.category && r.category !== '其他' ? r.category : D.KINDS[r.kind],
+      amount: cents == null ? '' : D.yuan(cents),
+      quantity: quantity100 ? (r.quantity100 == null ? '≈' : '') + (quantity100 / 100).toFixed(2) : '',
+      unit,
+      symbol: { fuel: '油', charge: '电', service: '养', other: '账' }[r.kind],
+      detail: [price, rates && rates[r.id]].filter(Boolean).join(' · '),
+    }),
+    confidence = r.home ? C.confidence(r, state || {}) : 'actual';
+  view.priceText = (r.cents == null ? '预估 ' : '') + '¥' + view.amount;
+  view.confidence = confidence === 'actual' ? '' : C.confidenceText(confidence);
+  view.pending = r.home && r.settle === 'pending';
+  view.allocated = r.home ? C.allocatedPercent(r) : 0;
+  if (r.home)
+    view.detail = [
+      price,
+      rates && rates[r.id],
+      r.settle === 'pending' ? '待对账' + (view.allocated ? `（已对账 ${view.allocated}%）` : '') : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  return view;
 }
 function intervalRates(records) {
   const rates = {};
@@ -39,6 +57,19 @@ function snapshot() {
         .sort((a, b) => a.rank - b.rank || a.urgency - b.urgency)
     : [];
   return { s, v, records, mileage, plans };
+}
+// What still waits for a grid bill, and the estimate it carries, for the home and settlement pages.
+function homeSummary(s, v) {
+  const mine = v ? s.records.filter(r => r.vehicleId === v.id && r.home) : [],
+    pending = mine.filter(r => r.settle === 'pending');
+  return {
+    meter: s.home.meter,
+    bills: s.bills.length,
+    pending: pending.length,
+    pendingCents: pending.reduce((sum, r) => sum + (r.estCents || 0), 0),
+    pendingCharge100: pending.reduce((sum, r) => sum + (r.estQuantity100 || 0), 0),
+    settled: mine.filter(r => r.settle === 'bill').length,
+  };
 }
 // The record deleted last can be put back for a minute from the list pages.
 let lastDeleted = null;
@@ -182,6 +213,7 @@ module.exports = {
   recordView,
   intervalRates,
   snapshot,
+  homeSummary,
   base,
   guard,
   back,

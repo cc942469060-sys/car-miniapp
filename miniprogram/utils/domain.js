@@ -27,6 +27,22 @@ function validDate(s) {
   const d = new Date(s + 'T00:00:00Z');
   return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === s;
 }
+// Clock times are stored as text (HH:MM) and compared as minutes of the day; neither is a date or a time zone.
+function minutes(text) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(text == null ? '' : text).trim());
+  if (!m) return null;
+  const h = Number(m[1]),
+    mi = Number(m[2]);
+  return h >= 0 && h < 24 && mi >= 0 && mi < 60 ? h * 60 + mi : null;
+}
+function clock(value) {
+  const m = ((value % 1440) + 1440) % 1440;
+  return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+}
+// The date `count` minutes after the start of `date`, so 22:00–03:00 ends on the next day.
+function dateAfter(date, count) {
+  return addDays(date, Math.floor(count / 1440));
+}
 function integer(value, label, max = 9999999) {
   assert(String(value).trim() !== '' && /^\d+$/.test(String(value)), `${label}请输入非负整数`);
   const n = Number(value);
@@ -81,6 +97,10 @@ function normalizeVehicle(input, existing, records) {
     '请选择能源类型'
   );
   assert(validDate(input.baseDate) && input.baseDate <= today(), '里程日期无效或晚于今天');
+  // Battery capacity is optional, only for vehicles that can be plugged in, and used only where the user enables it.
+  const battery =
+    input.batteryKwh === '' || input.batteryKwh == null ? null : fixed(input.batteryKwh, '电池容量', true);
+  assert(battery == null || (battery >= 100 && battery <= 30000), '电池容量需在 1–300 kWh 之间');
   const v = {
     id: existing ? existing.id : input.id,
     name,
@@ -90,6 +110,7 @@ function normalizeVehicle(input, existing, records) {
       .slice(0, 50),
     baseDate: input.baseDate,
     baseMileage: integer(input.baseMileage, '累计里程'),
+    batteryKwh100: TYPES.find(t => t.id === input.type).charge ? battery : null,
     archived: existing ? existing.archived : false,
   };
   assert(
@@ -105,29 +126,95 @@ function normalizeRecord(input, v) {
   assert(validDate(input.date) && input.date <= today(), '记录日期无效或晚于今天');
   // Other expenses (parking, tolls...) may omit mileage unless they complete a plan; such records stay out of the mileage timeline.
   const planId = input.planId || '',
-    noMileage = input.kind === 'other' && !planId && (input.mileage === '' || input.mileage == null);
+    noMileage = input.kind === 'other' && !planId && (input.mileage === '' || input.mileage == null),
+    home = input.kind === 'charge' && input.home === true,
+    blank = value => value === '' || value == null;
   const r = {
     id: input.id,
     vehicleId: v.id,
     kind: input.kind,
     date: input.date,
     mileage: noMileage ? null : integer(input.mileage, '累计里程'),
-    cents: fixed(input.amount, '金额'),
+    // A home charge may be settled from a bill or an estimate, so its amount and quantity are filled in later.
+    cents: home && blank(input.amount) ? null : fixed(input.amount, '金额'),
     note: String(input.note || '')
       .trim()
       .slice(0, 120),
     planId,
     complete: !!input.complete,
+    home,
   };
-  if (r.kind === 'fuel' || r.kind === 'charge') r.quantity100 = fixed(input.quantity, '补能量', true);
+  if (r.kind === 'fuel' || r.kind === 'charge')
+    r.quantity100 = home && blank(input.quantity) ? null : fixed(input.quantity, '补能量', true);
   if (r.kind === 'fuel') {
     r.full = !!input.full;
     r.gap = !!input.gap;
   }
-  if (r.kind === 'charge') {
-    r.socAfter = input.socAfter === '' || input.socAfter == null ? null : integer(input.socAfter, '充电后电量', 100);
-    // A single switch covers completeness for charging: every charge since the previous one is recorded.
-    r.confirmed = !!input.confirmed;
+  if (home) {
+    const start = blank(input.startTime) ? null : minutes(input.startTime),
+      end = blank(input.endTime) ? null : minutes(input.endTime);
+    assert(blank(input.startTime) || start != null, '开始充电时间无效');
+    assert(blank(input.endTime) || end != null, '充满时间无效');
+    r.settle = ['pending', 'estimate', 'manual', 'bill'].includes(input.settle) ? input.settle : '';
+    assert(r.settle, '请选择家充的对账方式');
+    assert(r.settle === 'manual' || start != null, '请填写开始充电时间');
+    r.startTime = start == null ? '' : clock(start);
+    r.endTime = end == null ? '' : clock(end);
+    r.endEstimated = !!input.endEstimated;
+    r.socBefore = blank(input.socBefore) ? null : integer(input.socBefore, '充电前电量', 100);
+    r.socAfter = blank(input.socAfter) ? null : integer(input.socAfter, '充电后电量', 100);
+    assert(r.socBefore == null || r.socAfter == null || r.socBefore < r.socAfter, '充电后电量需要高于充电前电量');
+    r.estQuantity100 = Number.isSafeInteger(input.estQuantity100)
+      ? input.estQuantity100
+      : blank(input.estQuantity)
+        ? null
+        : fixed(input.estQuantity, '估计电量', true);
+    r.estCents = Number.isSafeInteger(input.estCents) ? input.estCents : null;
+    r.estMethod = ['soc', 'power', 'typed'].includes(input.estMethod) ? input.estMethod : '';
+    r.estK10000 = Number.isSafeInteger(input.estK10000) ? input.estK10000 : null;
+    // Allocation is always derived from the bills; anything handed in here is recomputed by settleAll.
+    r.alloc = Array.isArray(input.alloc)
+      ? input.alloc
+          .filter(
+            a =>
+              a &&
+              typeof a.billId === 'string' &&
+              Number.isSafeInteger(a.quantity100) &&
+              Number.isSafeInteger(a.cents) &&
+              Number.isSafeInteger(a.weight100)
+          )
+          .map(a => ({ billId: a.billId, quantity100: a.quantity100, cents: a.cents, weight100: a.weight100 }))
+      : [];
+    r.confirmed = r.settle === 'manual' || r.settle === 'bill';
+    if (r.settle === 'pending' || r.settle === 'estimate') {
+      if (r.settle === 'estimate') {
+        assert(r.estQuantity100 != null && r.estCents != null, '按预估入账需要先估算电量和金额');
+        r.quantity100 = r.estQuantity100;
+        r.cents = r.estCents;
+      } else {
+        r.quantity100 = null;
+        r.cents = null;
+      }
+    } else {
+      assert(r.quantity100 != null && r.quantity100 > 0, '补能量请填写大于 0 的数字');
+      assert(r.cents != null, '金额不能为空');
+    }
+  } else {
+    r.settle = '';
+    r.startTime = '';
+    r.endTime = '';
+    r.endEstimated = false;
+    r.socBefore = null;
+    r.estQuantity100 = null;
+    r.estCents = null;
+    r.estMethod = '';
+    r.estK10000 = null;
+    r.alloc = [];
+    if (r.kind === 'charge') {
+      r.socAfter = input.socAfter === '' || input.socAfter == null ? null : integer(input.socAfter, '充电后电量', 100);
+      // A single switch covers completeness for charging: every charge since the previous one is recorded.
+      r.confirmed = !!input.confirmed;
+    }
   }
   // Records saved before categories existed, or with an unknown one, count as 其他.
   if (r.kind === 'other') r.category = OTHER_CATEGORIES.includes(input.category) ? input.category : '其他';
@@ -138,9 +225,20 @@ function normalizeRecord(input, v) {
 function recordInput(r) {
   return Object.assign({}, r, {
     mileage: r.mileage == null ? '' : String(r.mileage),
-    amount: money(r.cents),
+    amount: r.cents == null ? '' : money(r.cents),
     quantity: r.quantity100 ? (r.quantity100 / 100).toFixed(2) : '',
     socAfter: r.socAfter == null ? '' : String(r.socAfter),
+    socBefore: r.socBefore == null ? '' : String(r.socBefore),
+    startTime: r.startTime || '',
+    endTime: r.endTime || '',
+    settle: r.settle || '',
+    home: !!r.home,
+    estQuantity: r.estQuantity100 == null ? '' : (r.estQuantity100 / 100).toFixed(2),
+    estQuantity100: r.estQuantity100 == null ? null : r.estQuantity100,
+    estCents: r.estCents == null ? null : r.estCents,
+    estMethod: r.estMethod || '',
+    estK10000: r.estK10000 == null ? null : r.estK10000,
+    alloc: Array.isArray(r.alloc) ? r.alloc : [],
   });
 }
 // Records keep the amount and quantity, not the unit price. The shortest price (2 to 4 decimals) that gives back the
@@ -154,21 +252,29 @@ function unitPrice(r) {
 // A new fuel or charge record starts from the latest reading and repeats the unit price, note and state of charge of
 // the last record of its kind. Other kinds start empty, so parking fees and the like keep their mileage optional.
 function recordDefaults(v, records, kind) {
-  if (kind !== 'fuel' && kind !== 'charge') return { mileage: '', price: '', note: '', socAfter: '' };
-  const last = records
+  if (kind !== 'fuel' && kind !== 'charge')
+    return { mileage: '', price: '', note: '', socAfter: '', home: false, startTime: '', socBefore: '' };
+  const mine = records
     .filter(r => r.vehicleId === v.id && r.kind === kind)
-    .sort((a, b) => b.date.localeCompare(a.date) || b.mileage - a.mileage || b.id.localeCompare(a.id))[0];
+    .sort((a, b) => b.date.localeCompare(a.date) || b.mileage - a.mileage || b.id.localeCompare(a.id));
+  const last = mine[0],
+    // A charge still waiting for its bill has no amount yet; the unit price comes from the newest settled one.
+    priced = mine.find(r => r.quantity100 && r.cents);
   return {
     mileage: String(currentMileage(v, records).mileage),
-    price: last ? unitPrice(last) : '',
+    price: priced ? unitPrice(priced) : '',
     note: last ? last.note || '' : '',
     socAfter: last && last.socAfter != null ? String(last.socAfter) : '',
+    home: !!(last && kind === 'charge' && last.home),
+    startTime: last && last.home ? last.startTime || '' : '',
+    socBefore: last && last.home && last.socBefore != null ? String(last.socBefore) : '',
   };
 }
 // Soft checks for likely typos in a normalized record; the user confirms and may still save.
-function recordWarnings(r, v, records) {
+function recordWarnings(r, v, records, extra) {
   const warnings = [],
-    quantity = r.quantity100 ? r.quantity100 / 100 : 0;
+    quantity100 = r.quantity100 != null ? r.quantity100 : r.estQuantity100,
+    quantity = quantity100 ? quantity100 / 100 : 0;
   if (r.mileage != null) {
     const prev = records
       .concat([{ vehicleId: v.id, date: v.baseDate, mileage: v.baseMileage }])
@@ -191,6 +297,22 @@ function recordWarnings(r, v, records) {
   const price = quantity && r.cents ? r.cents / 100 / quantity : 0;
   if (price && (r.kind === 'fuel' ? price < 4 || price > 15 : price > 5))
     warnings.push(`单价约 ¥${price.toFixed(2)}/${r.kind === 'fuel' ? 'L' : 'kWh'}，与常见价格差别较大`);
+  // The two home-charge estimates should roughly agree; a wide gap usually means the wrong end time was entered.
+  if (r.home && extra && extra.home && extra.k != null && r.socBefore != null && r.socAfter != null && r.endTime) {
+    const start = minutes(r.startTime),
+      end = minutes(r.endTime);
+    if (start != null && end != null) {
+      const span = end <= start ? end + 1440 - start : end - start,
+        bySoc = Math.round(extra.k * (r.socAfter - r.socBefore)),
+        byPower = extra.home.chargerKw100 ? Math.round((extra.home.chargerKw100 * span) / 60) : 0;
+      if (bySoc > 0 && byPower > 0 && Math.abs(bySoc - byPower) > 0.25 * Math.max(bySoc, byPower))
+        warnings.push(
+          `按电量差估算 ${(bySoc / 100).toFixed(2)} kWh，按功率时长估算 ${(byPower / 100).toFixed(
+            2
+          )} kWh，相差较大，请核对充满时间`
+        );
+    }
+  }
   return warnings;
 }
 // Only completed, explicitly valid intervals contribute; never average interval rates directly.
@@ -205,10 +327,13 @@ function energyIntervals(records, kind) {
     endpoints = 0;
   const intervals = [];
   sorted.forEach(r => {
-    const broken = r.gap || (kind === 'charge' && !r.confirmed);
+    // A home charge waiting for its bill, or booked from an estimate, has only an estimate so far: it closes nothing.
+    const pending = kind === 'charge' && (r.settle === 'pending' || r.settle === 'estimate'),
+      broken = r.gap || pending || (kind === 'charge' && !r.confirmed);
     open = broken
       ? []
       : open.map(a => ({ record: a.record, quantity: a.quantity + r.quantity100, cents: a.cents + (r.cents || 0) }));
+    if (pending) return;
     if (!(kind === 'fuel' ? r.full : r.socAfter != null)) return;
     endpoints++;
     const anchor = open.find(a => kind === 'fuel' || a.record.socAfter === r.socAfter);
@@ -238,7 +363,11 @@ function energyIntervals(records, kind) {
     km,
     rate,
     costPerKm: km ? (c / km / 100).toFixed(2) : null,
-    hint: rate ? '' : energyHint(kind, sorted.length, endpoints, open),
+    hint: rate
+      ? ''
+      : kind === 'charge' && sorted.some(r => r.settle === 'pending' || r.settle === 'estimate')
+        ? '有家充待对账，对账后即可算出电耗'
+        : energyHint(kind, sorted.length, endpoints, open),
   };
 }
 // Why no rate is shown yet, and which record would produce one.
@@ -252,23 +381,37 @@ function energyHint(kind, count, endpoints, open) {
   if (!endpoints) return fuel ? '加满时打开「本次已加满」，两次加满即可算出油耗' : '填写「充电后电量」后才能算出电耗';
   return fuel ? '最近一次标记了漏记，下次加满后重新开始计算' : '最近一次充电未确认都已记录，下次充电后重新开始计算';
 }
+// An expense still waiting for its bill counts at its estimate, and is reported separately so pages can say so.
+function effectiveCents(r) {
+  return r.cents == null ? r.estCents || 0 : r.cents;
+}
+function effectiveQuantity(r) {
+  return r.quantity100 == null ? r.estQuantity100 || 0 : r.quantity100;
+}
 // `period` is a month (YYYY-MM) or a year (YYYY).
 function statistics(records, period) {
   const filtered = records.filter(r => r.date.startsWith(period)),
     categories = Object.keys(KINDS).map(kind => ({
       kind,
       name: KINDS[kind],
-      cents: filtered.filter(r => r.kind === kind).reduce((s, r) => s + r.cents, 0),
+      cents: filtered.filter(r => r.kind === kind).reduce((s, r) => s + effectiveCents(r), 0),
     }));
   const others = OTHER_CATEGORIES.map(name => ({
     name,
-    cents: filtered.filter(r => r.kind === 'other' && (r.category || '其他') === name).reduce((s, r) => s + r.cents, 0),
+    cents: filtered
+      .filter(r => r.kind === 'other' && (r.category || '其他') === name)
+      .reduce((s, r) => s + r.cents, 0),
   })).filter(x => x.cents);
   return {
-    total: filtered.reduce((s, r) => s + r.cents, 0),
+    total: filtered.reduce((s, r) => s + effectiveCents(r), 0),
     count: filtered.length,
-    fuel: filtered.filter(r => r.kind === 'fuel').reduce((s, r) => s + r.quantity100, 0),
-    charge: filtered.filter(r => r.kind === 'charge').reduce((s, r) => s + r.quantity100, 0),
+    fuel: filtered.filter(r => r.kind === 'fuel').reduce((s, r) => s + effectiveQuantity(r), 0),
+    charge: filtered.filter(r => r.kind === 'charge').reduce((s, r) => s + effectiveQuantity(r), 0),
+    estimatedCents: filtered.reduce((s, r) => s + (r.cents == null ? r.estCents || 0 : 0), 0),
+    estimatedCharge100: filtered.reduce(
+      (s, r) => s + (r.kind === 'charge' && r.quantity100 == null ? r.estQuantity100 || 0 : 0),
+      0
+    ),
     categories,
     others,
   };
@@ -287,7 +430,7 @@ function addDays(date, count) {
 function monthlyTrend(records, month, count = 12) {
   return Array.from({ length: count }, (_, i) => addMonths(month + '-01', i - count + 1).slice(0, 7)).map(m => ({
     month: m,
-    cents: records.filter(r => r.date.slice(0, 7) === m).reduce((s, r) => s + r.cents, 0),
+    cents: records.filter(r => r.date.slice(0, 7) === m).reduce((s, r) => s + effectiveCents(r), 0),
   }));
 }
 // Average daily distance from odometer readings: from the last reading at least 90 days before the latest one (or the first reading),
@@ -415,6 +558,9 @@ module.exports = {
   fail,
   assert,
   validDate,
+  minutes,
+  clock,
+  dateAfter,
   integer,
   fixed,
   money,
@@ -429,6 +575,8 @@ module.exports = {
   unitPrice,
   recordDefaults,
   recordWarnings,
+  effectiveCents,
+  effectiveQuantity,
   energyIntervals,
   statistics,
   monthlyTrend,

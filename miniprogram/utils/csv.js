@@ -14,6 +14,12 @@ const HEADER = [
   '充电后电量(%)',
   '关联计划',
   '备注',
+  '家充',
+  '充电时段',
+  '充电前电量(%)',
+  '数据来源',
+  '预估电量(kWh)',
+  '预估金额(元)',
 ];
 // Quotes a field when needed, and keeps typed text that starts like a formula from running in the spreadsheet.
 function cell(value) {
@@ -29,13 +35,14 @@ function recordsCsv(state) {
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date) || (a.mileage || 0) - (b.mileage || 0) || a.id.localeCompare(b.id))
     .map(r => {
-      const quantity = r.quantity100 ? (r.quantity100 / 100).toFixed(2) : '';
+      const quantity = r.quantity100 ? (r.quantity100 / 100).toFixed(2) : '',
+        source = { soc: '电量差', power: '功率时长', typed: '手填' }[r.estMethod] || '';
       return [
         cell(vehicles.get(r.vehicleId)),
         r.date,
         D.KINDS[r.kind],
         cell(r.kind === 'other' ? r.category || '其他' : ''),
-        D.money(r.cents),
+        r.cents == null ? '' : D.money(r.cents),
         r.mileage == null ? '' : r.mileage,
         quantity,
         quantity ? (r.kind === 'fuel' ? 'L' : 'kWh') : '',
@@ -44,6 +51,12 @@ function recordsCsv(state) {
         r.kind === 'charge' && r.socAfter != null ? r.socAfter : '',
         cell(r.planId ? plans.get(r.planId) : ''),
         cell(r.note),
+        r.home ? '是' : '',
+        r.home && r.startTime ? `${r.startTime}–${r.endTime}${r.endEstimated ? '（预估）' : ''}` : '',
+        r.home && r.socBefore != null ? r.socBefore : '',
+        source,
+        r.home && r.estQuantity100 ? (r.estQuantity100 / 100).toFixed(2) : '',
+        r.home && r.estCents != null ? D.money(r.estCents) : '',
       ].join(',');
     });
   return '\uFEFF' + [HEADER.join(',')].concat(rows).join('\r\n') + '\r\n';

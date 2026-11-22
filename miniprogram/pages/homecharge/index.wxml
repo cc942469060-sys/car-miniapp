@@ -1,0 +1,29 @@
+<view class="page"><view class="title">家充设置</view><view class="subtitle">这里只影响家充的估算与对账；快充和其他充电记录不受影响。</view><view wx:if="{{error}}" class="error">{{error}}</view>
+<view class="section"><text class="section-title">电表类型</text></view>
+<view class="filters"><view class="filter {{meter === 'dedicated' ? 'selected' : ''}}" data-value="dedicated" bindtap="pickMeter" aria-role="button">独立电表</view><view class="filter {{meter === 'shared' ? 'selected' : ''}}" data-value="shared" bindtap="pickMeter" aria-role="button">共用总表</view></view>
+<view class="tiny" wx:if="{{meter === 'dedicated'}}">独立电表：只给车充电。录电网账单后，会把待对账的家充分摊成实际值。</view>
+<view class="tiny" wx:elif="{{meter === 'shared'}}">共用总表：和家里其他用电混在一起，没有账单可对。家充按「预估电量 × 电价」入账，永远带预估标签。</view>
+<view class="tiny" wx:else>先选一种，再记家充。选错可以随时改，已有记录会跟着调整。</view>
+<view class="section"><text class="section-title">充电桩功率</text></view>
+<view class="field"><view class="label">额定功率 · kW</view><input class="input" type="digit" value="{{chargerKw}}" data-field="chargerKw" bindinput="inputTop" placeholder="例如 7.00"/></view>
+<view class="muted">填满电状态下充电桩的额定功率，用来在没有充电前后电量时按时间推算电量。</view>
+<button class="secondary" bindtap="savePower">保存功率</button>
+<view class="section"><text class="section-title">每 1% 电量对应多少 kWh</text></view>
+<view wx:if="{{!kRows.length}}" class="empty"><view class="muted">车库里的车都不是插混或纯电，还没有可以估算的家充。</view></view>
+<view wx:for="{{kRows}}" wx:key="id" class="card"><view class="row"><view class="row-main"><view class="row-title">{{item.name}}</view><view class="row-meta">{{item.source}}{{item.mae ? ' · ' + item.mae : ''}}</view></view><view class="row-price">{{item.k}} kWh</view></view></view>
+<view class="tiny">默认按电池标称容量 ÷ 90% 充电效率估算。录过 3 张以上账单后，改用账单电量与实际充电幅度校准。</view>
+<view class="section"><text class="section-title">电价版本</text></view>
+<view class="muted">每段从开始时间生效，直到下一段开始；最后一段跨零点接回第一段。某天用生效日期不晚于该天的最新版本。</view>
+<view class="actions"><button class="secondary" bindtap="addTariff">新增版本</button><button class="quiet" bindtap="addTariff" data-copy="1">复制生效中</button></view>
+<block wx:if="{{editing}}">
+<view class="card"><view class="row-title">{{form.id ? '编辑电价版本' : '新增电价版本'}}</view>
+<view class="field"><view class="label">生效日期 *</view><picker mode="date" value="{{form.from}}" end="{{today}}" bindchange="editFrom"><view class="picker">{{form.from || '选择日期'}} ▾</view></picker></view>
+<view class="section-title">时段</view>
+<view wx:for="{{form.periods}}" wx:key="index" class="spaced"><view class="field"><view class="label">开始时间</view><picker mode="time" value="{{item.start}}" data-index="{{index}}" data-field="start" bindchange="editPeriod"><view class="picker">{{item.start || '选择时间'}} ▾</view></picker></view><view class="field"><view class="label">时段</view><picker range="{{labels}}" range-key="name" value="{{item.labelIndex}}" data-index="{{index}}" bindchange="editPeriodLabel"><view class="picker">{{labels[item.labelIndex].name}} ▾</view></picker></view><view class="field"><view class="label">电价 · 元/kWh</view><input class="input" type="digit" value="{{item.price}}" data-index="{{index}}" data-field="price" bindinput="editPeriod" placeholder="例如 0.3000"/><text class="link" data-index="{{index}}" bindtap="removePeriod">删除这段</text></view></view>
+<button class="quiet" bindtap="addPeriod">＋ 添加时段</button>
+<view class="actions"><button class="quiet" bindtap="cancelTariff">取消</button><button class="primary" loading="{{saving}}" bindtap="saveTariff">保存电价</button></view>
+</view>
+</block>
+<view wx:if="{{!tariffs.length}}" class="empty"><view class="muted">还没有电价版本。家充估算需要至少一个版本。</view></view>
+<view wx:for="{{tariffs}}" wx:key="id" class="card"><view class="row"><view class="row-main"><view class="row-title">{{item.from}} 起</view><view class="row-meta">{{item.text}}</view></view></view><view class="actions"><button class="quiet" data-id="{{item.id}}" bindtap="editTariff">编辑</button><button class="quiet" data-id="{{item.id}}" bindtap="deleteTariff">删除</button></view></view>
+<view class="footer-note">电价填 0.0001–5 之间的数字，最多四位小数，按元/kWh。没有电表类型时只能按手动填写的实际值记录家充。</view></view>
