@@ -185,7 +185,8 @@ function normalizeRecord(input, v) {
           )
           .map(a => ({ billId: a.billId, quantity100: a.quantity100, cents: a.cents, weight100: a.weight100 }))
       : [];
-    r.confirmed = r.settle === 'manual' || r.settle === 'bill';
+    // The user's answer to 「上次以来的充电都已记录」, kept as is: settling a bill says nothing about charges elsewhere.
+    r.confirmed = !!input.confirmed;
     if (r.settle === 'pending' || r.settle === 'estimate') {
       if (r.settle === 'estimate') {
         assert(r.estQuantity100 != null && r.estCents != null, '按预估入账需要先估算电量和金额');
@@ -267,7 +268,8 @@ function recordDefaults(v, records, kind) {
     socAfter: last && last.socAfter != null ? String(last.socAfter) : '',
     home: !!(last && kind === 'charge' && last.home),
     startTime: last && last.home ? last.startTime || '' : '',
-    socBefore: last && last.home && last.socBefore != null ? String(last.socBefore) : '',
+    // The state of charge before charging differs every time; repeating the last one would silently skew the estimate.
+    socBefore: '',
   };
 }
 // Soft checks for likely typos in a normalized record; the user confirms and may still save.
@@ -298,7 +300,16 @@ function recordWarnings(r, v, records, extra) {
   if (price && (r.kind === 'fuel' ? price < 4 || price > 15 : price > 5))
     warnings.push(`单价约 ¥${price.toFixed(2)}/${r.kind === 'fuel' ? 'L' : 'kWh'}，与常见价格差别较大`);
   // The two home-charge estimates should roughly agree; a wide gap usually means the wrong end time was entered.
-  if (r.home && extra && extra.home && extra.k != null && r.socBefore != null && r.socAfter != null && r.endTime) {
+  if (
+    r.home &&
+    extra &&
+    extra.home &&
+    extra.k != null &&
+    r.socBefore != null &&
+    r.socAfter != null &&
+    r.endTime &&
+    !r.endEstimated
+  ) {
     const start = minutes(r.startTime),
       end = minutes(r.endTime);
     if (start != null && end != null) {
@@ -382,6 +393,10 @@ function energyHint(kind, count, endpoints, open) {
   return fuel ? '最近一次标记了漏记，下次加满后重新开始计算' : '最近一次充电未确认都已记录，下次充电后重新开始计算';
 }
 // An expense still waiting for its bill counts at its estimate, and is reported separately so pages can say so.
+// A home charge still waiting for its bill, or booked at its estimate on a shared meter, carries only an estimate.
+function isEstimated(r) {
+  return !!r.home && (r.settle === 'pending' || r.settle === 'estimate');
+}
 function effectiveCents(r) {
   return r.cents == null ? r.estCents || 0 : r.cents;
 }
@@ -405,9 +420,9 @@ function statistics(records, period) {
     count: filtered.length,
     fuel: filtered.filter(r => r.kind === 'fuel').reduce((s, r) => s + effectiveQuantity(r), 0),
     charge: filtered.filter(r => r.kind === 'charge').reduce((s, r) => s + effectiveQuantity(r), 0),
-    estimatedCents: filtered.reduce((s, r) => s + (r.cents == null ? r.estCents || 0 : 0), 0),
+    estimatedCents: filtered.reduce((s, r) => s + (isEstimated(r) ? effectiveCents(r) : 0), 0),
     estimatedCharge100: filtered.reduce(
-      (s, r) => s + (r.kind === 'charge' && r.quantity100 == null ? r.estQuantity100 || 0 : 0),
+      (s, r) => s + (r.kind === 'charge' && isEstimated(r) ? effectiveQuantity(r) : 0),
       0
     ),
     categories,
@@ -573,6 +588,7 @@ module.exports = {
   unitPrice,
   recordDefaults,
   recordWarnings,
+  isEstimated,
   effectiveCents,
   effectiveQuantity,
   energyIntervals,

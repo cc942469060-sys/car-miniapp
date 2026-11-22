@@ -139,10 +139,15 @@ test('待对账的家充记录只存预估：结束时间按功率推算，电�
   assert.deepEqual([stats.total, stats.estimatedCents, stats.estimatedCharge100], [1260, 1260, 3500]);
 });
 
-test('手动填写的家充按实际值入账，缺少开始时间仍可保存', () => {
+test('手动填写的家充按实际值入账；独立电表下必须有开始时间，否则账单无法扣除它', () => {
   const { store } = fixture(),
     id = car(store);
   home(store);
+  assert.throws(
+    () => homeRecord(store, id, { date: '2025-11-20', settle: 'manual', quantity: '20', amount: '12.60' }),
+    /请填写开始充电时间/
+  );
+  store.saveHome({ meter: '', chargerKw: '7' });
   homeRecord(store, id, {
     date: '2025-11-20',
     settle: 'manual',
@@ -151,7 +156,7 @@ test('手动填写的家充按实际值入账，缺少开始时间仍可保存',
     socAfter: '80',
   });
   const r = store.read().records[0];
-  assert.deepEqual([r.settle, r.quantity100, r.cents, r.confirmed], ['manual', 2000, 1260, true]);
+  assert.deepEqual([r.settle, r.quantity100, r.cents, r.confirmed], ['manual', 2000, 1260, false]);
   assert.equal(C.confidence(r, store.read()), 'actual');
 });
 
@@ -199,7 +204,8 @@ test('录入账单后自动分摊：电量与金额按预估权重拆分，覆�
   store.saveBill({ from: '2025-11-20', to: '2025-11-20', quantity: '14.50', amount: '', note: '' });
   s = store.read();
   ra = s.records.find(r => r.id === a);
-  assert.deepEqual([ra.settle, ra.quantity100, ra.cents, ra.confirmed], ['bill', 3760, 1346, true]);
+  // Settlement keeps the user's 「都已记录」 answer, here left off.
+  assert.deepEqual([ra.settle, ra.quantity100, ra.cents, ra.confirmed], ['bill', 3760, 1346, false]);
   assert.equal(C.confidence(ra, s), 'allocated');
   assert.equal(s.bills.length, 2);
   // Deleting a bill sends the charge back to 待对账 but keeps its estimate.
@@ -320,4 +326,154 @@ test('备份导出再恢复后分摊按账单重算，旧版备份也能恢复',
   assert.deepEqual(t.bills, []);
   assert.deepEqual(t.home, { meter: '', chargerKw100: 700, tariffs: [] });
   assert.equal(t.records[0].quantity100, 4000);
+});
+
+// Regressions from the review of the home charging change.
+test('跨零点的手填实际值记录，在每张日账单里只扣除落在当天的部分', () => {
+  const { store } = fixture(),
+    id = car(store);
+  home(store);
+  homeRecord(store, id, {
+    date: '2025-11-20',
+    startTime: '22:00',
+    endTime: '03:00',
+    settle: 'manual',
+    quantity: '35',
+    amount: '12.60',
+  });
+  homeRecord(store, id, { date: '2025-11-20', startTime: '19:00', endTime: '21:00', socBefore: '70', socAfter: '90' });
+  store.saveBill({ from: '2025-11-20', to: '2025-11-20', quantity: '30', amount: '', note: '' });
+  const s = store.read(),
+    manual = s.records.find(r => r.settle === 'manual'),
+    other = s.records.find(r => r.settle !== 'manual');
+  // 22:00–24:00 is 2 of the 5 hours, so 14.00 of 35.00 kWh belongs to the 11-20 bill.
+  assert.deepEqual(
+    manual.alloc.map(a => a.quantity100),
+    [1400]
+  );
+  assert.equal(other.quantity100, 1600);
+  assert.deepEqual(C.settleAll(s), []);
+});
+
+test('对账不改变「上次以来的充电都已记录」，未确认时不出电耗', () => {
+  const { store } = fixture(),
+    id = car(store);
+  home(store);
+  homeRecord(store, id, { date: '2025-11-19', startTime: '22:00', socBefore: '70', socAfter: '80', confirmed: true });
+  homeRecord(store, id, {
+    date: '2025-11-20',
+    mileage: '1300',
+    startTime: '22:00',
+    socBefore: '60',
+    socAfter: '80',
+    confirmed: false,
+  });
+  store.saveBill({ from: '2025-11-19', to: '2025-11-21', quantity: '21', amount: '', note: '' });
+  let s = store.read();
+  assert.deepEqual(
+    s.records.map(r => [r.settle, r.confirmed]),
+    [
+      ['bill', true],
+      ['bill', false],
+    ]
+  );
+  assert.equal(D.energyIntervals(s.records, 'charge').rate, null);
+  // Once the user confirms the charges in between were all recorded, the settled values give a rate.
+  store.saveRecord(Object.assign(D.recordInput(s.records[1]), { confirmed: true }));
+  s = store.read();
+  assert.equal(s.records[1].settle, 'bill');
+  assert.ok(D.energyIntervals(s.records, 'charge').rate);
+});
+
+test('编辑待对账记录时重新推算充满时间，不把上次推算的时间当成用户填写', () => {
+  const { store } = fixture(),
+    id = car(store);
+  home(store);
+  const rid = homeRecord(store, id, { date: '2025-11-20', startTime: '22:00', socBefore: '30', socAfter: '80' });
+  let r = store.read().records[0];
+  assert.deepEqual([r.endTime, r.endEstimated, r.estQuantity100], ['03:00', true, 3500]);
+  store.saveRecord(Object.assign(D.recordInput(r), { socAfter: '60' }));
+  r = store.read().records.find(x => x.id === rid);
+  assert.deepEqual([r.endTime, r.endEstimated, r.estQuantity100, r.estMethod], ['01:00', true, 2100, 'soc']);
+});
+
+test('已对账记录修改电量百分比后重新估算并按账单重新分摊', () => {
+  const { store } = fixture(),
+    id = car(store);
+  home(store);
+  const a = homeRecord(store, id, { date: '2025-11-20', startTime: '19:00', socBefore: '50', socAfter: '70' });
+  homeRecord(store, id, { date: '2025-11-20', startTime: '21:30', socBefore: '70', socAfter: '80' });
+  store.saveBill({ from: '2025-11-20', to: '2025-11-20', quantity: '30', amount: '', note: '' });
+  let s = store.read();
+  assert.deepEqual(
+    s.records.map(r => r.quantity100),
+    [2000, 1000]
+  );
+  store.saveRecord(Object.assign(D.recordInput(s.records.find(r => r.id === a)), { socAfter: '60' }));
+  s = store.read();
+  assert.deepEqual(
+    s.records.map(r => [r.settle, r.estQuantity100, r.quantity100]),
+    [
+      ['bill', 700, 1500],
+      ['bill', 700, 1500],
+    ]
+  );
+});
+
+test('家充改成非家充后，账单重新分给其余记录', () => {
+  const { store } = fixture(),
+    id = car(store);
+  home(store);
+  const a = homeRecord(store, id, { date: '2025-11-20', startTime: '19:00', socBefore: '50', socAfter: '70' });
+  homeRecord(store, id, { date: '2025-11-20', startTime: '21:30', socBefore: '70', socAfter: '80' });
+  store.saveBill({ from: '2025-11-20', to: '2025-11-20', quantity: '20', amount: '', note: '' });
+  const ra = store.read().records.find(r => r.id === a);
+  store.saveRecord(
+    Object.assign(D.recordInput(ra), { home: false, settle: '', quantity: '14', amount: '8', confirmed: true })
+  );
+  const s = store.read(),
+    other = s.records.find(r => r.id !== a);
+  assert.deepEqual([other.settle, other.quantity100], ['bill', 2000]);
+  assert.deepEqual(s.records.find(r => r.id === a).alloc, []);
+});
+
+test('共用总表的预估入账在统计、列表和 CSV 中都标为预估', () => {
+  const { store } = fixture(),
+    id = car(store);
+  store.saveHome({ meter: 'shared', chargerKw: '7' });
+  store.saveTariff(TARIFF);
+  homeRecord(store, id, {
+    date: '2025-11-20',
+    startTime: '22:00',
+    socBefore: '30',
+    socAfter: '80',
+    settle: 'estimate',
+  });
+  const s = store.read(),
+    stats = D.statistics(s.records, '2025-11');
+  assert.equal(s.records[0].settle, 'estimate');
+  assert.deepEqual([stats.total, stats.estimatedCents, stats.estimatedCharge100], [1260, 1260, 3500]);
+  assert.equal(D.isEstimated(s.records[0]), true);
+  const csv = require('../miniprogram/utils/csv').recordsCsv(s).split('\r\n')[1].split(',');
+  assert.equal(csv[16], '预估');
+});
+
+test('账单金额不能为负数，包括从备份恢复时', () => {
+  assert.throws(
+    () =>
+      C.normalizeBill({ from: '2025-11-01', to: '2025-11-01', quantity100: 100, cents: -500 }, [], null, {
+        meter: 'dedicated',
+      }),
+    /账单金额超出范围/
+  );
+});
+
+test('新家充不沿用上次的充电前电量', () => {
+  const { store } = fixture(),
+    id = car(store);
+  home(store);
+  homeRecord(store, id, { date: '2025-11-20', startTime: '22:00', socBefore: '30', socAfter: '80' });
+  const s = store.read(),
+    d = D.recordDefaults(s.vehicles[0], s.records, 'charge');
+  assert.deepEqual([d.home, d.startTime, d.socAfter, d.socBefore], [true, '22:00', '80', '']);
 });

@@ -912,3 +912,40 @@ test('共用总表按预估入账，不能录账单；关闭开关回到手动',
   assert.equal(raw.records[0].settle, 'manual');
   assert.equal(raw.records[0].cents, 800);
 });
+test('新账单默认只覆盖最早一条待对账记录的那一天；第一次点保存只预览', () => {
+  const id = createCar('ev'),
+    v = loadPage('vehicle', { id });
+  v.setData({ 'form.batteryKwh': '63' });
+  v.save();
+  const hc = loadPage('homecharge');
+  setMeter(hc, 'dedicated');
+  addPrices(hc, '2025-01-01', [{ start: '00:00', label: 'valley', labelIndex: 0, price: '0.3000' }]);
+  const entry = loadPage('entry', { vehicleId: id });
+  entry.toggleHome({ detail: { value: true } });
+  entry.setData({
+    'form.date': '2025-11-20',
+    'form.mileage': '1200',
+    'form.startTime': '22:00',
+    'form.socBefore': '30',
+    'form.socAfter': '80',
+  });
+  entry.save();
+  assert.equal(entry.data.error, '');
+  const settle = loadPage('settle');
+  settle.openNewBill();
+  assert.deepEqual([settle.data.form.from, settle.data.form.to], ['2025-11-20', '2025-11-20']);
+  settle.setData({ 'form.to': '2025-11-21', 'form.quantity': '35.00' });
+  settle.saveBill();
+  assert.equal(settle.data.preview.rows.length, 1);
+  assert.equal((raw.bills || []).length, 0);
+  settle.saveBill();
+  assert.equal(raw.bills.length, 1);
+  // A settled charge can still be edited, e.g. its note; its bill share is recomputed on save.
+  const edit = loadPage('entry', { id: raw.records[0].id });
+  assert.equal(edit.data.locked, true);
+  assert.equal(edit.data.form.endTime, '');
+  edit.input({ currentTarget: { dataset: { field: 'note' } }, detail: { value: '家里' } });
+  edit.save();
+  assert.equal(edit.data.error, '');
+  assert.deepEqual([raw.records[0].note, raw.records[0].settle, raw.records[0].quantity100], ['家里', 'bill', 3500]);
+});

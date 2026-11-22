@@ -105,6 +105,8 @@ Page(
           );
         else form = Object.assign(form, this.defaults[form.kind]);
         if (form.kind === 'charge' && form.home && !record) form.settle = this.settleFor(true);
+        // A derived end time is shown empty, so editing the charge level derives it again instead of keeping the old one.
+        if (form.endEstimated) Object.assign(form, { endTime: '', endEstimated: false });
         this.s = s;
         this.v = v;
         this.kInfo = C.homeK(v, s.records, s.bills);
@@ -211,6 +213,7 @@ Page(
         value = e.detail.value,
         patch = { ['form.' + field]: value, error: '', errorField: '' };
       this.typed[field] = true;
+      if (field === 'endTime') patch['form.endEstimated'] = false;
       if (field === 'amount') patch.autoAmount = value === '';
       if (field === 'quantity') patch.autoQuantity = value === '';
       if (field === 'amount' || field === 'price' || field === 'quantity')
@@ -242,7 +245,13 @@ Page(
     toggleHome(e) {
       const home = e.detail.value,
         patch = { 'form.home': home, 'form.settle': this.settleFor(home) };
-      if (!home) Object.assign(patch, { 'form.startTime': '', 'form.endTime': '', 'form.socBefore': '' });
+      if (!home)
+        Object.assign(patch, {
+          'form.startTime': '',
+          'form.endTime': '',
+          'form.endEstimated': false,
+          'form.socBefore': '',
+        });
       this.setData(patch);
       this.refresh(patch);
     },

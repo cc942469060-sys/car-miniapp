@@ -25,7 +25,7 @@ Page(
             records: records.map(r => U.recordView(r, rates, x.s)),
             amount: U.D.yuan(records.reduce((s, r) => s + U.D.effectiveCents(r), 0)),
             estimated: (() => {
-              const cents = records.filter(r => r.cents == null).reduce((s, r) => s + U.D.effectiveCents(r), 0);
+              const cents = records.filter(U.D.isEstimated).reduce((s, r) => s + U.D.effectiveCents(r), 0);
               return cents ? U.D.money(cents) : '';
             })(),
             count: records.length,

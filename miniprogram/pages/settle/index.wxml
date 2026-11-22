@@ -8,7 +8,7 @@
 <view class="field" id="f-quantity"><view class="label">账单总电量 · kWh *</view><input class="input" type="digit" value="{{form.quantity}}" data-field="quantity" bindinput="input" placeholder="例如 30.80"/></view>
 <view class="field" id="f-amount"><view class="label">账单金额 · 元（选填）</view><input class="input" type="digit" value="{{form.amount}}" data-field="amount" bindinput="input" placeholder="不填则按电价表计算"/></view>
 <view class="field"><view class="label">备注（选填）</view><input class="input" value="{{form.note}}" maxlength="120" data-field="note" bindinput="input" placeholder="例如：11 月上半月电费"/></view>
-<view class="actions"><button class="secondary" bindtap="previewBill">预览分摊</button><button class="primary" loading="{{saving}}" bindtap="saveBill">{{form.id ? '保存修改' : '保存账单'}}</button></view>
+<view class="actions"><button class="secondary" bindtap="previewBill">预览分摊</button><button class="primary" loading="{{saving}}" bindtap="saveBill">{{preview ? (form.id ? '确认保存修改' : '确认保存账单') : '预览并保存'}}</button></view>
 <block wx:if="{{preview}}"><view class="card"><view class="row-title">分摊预览</view><view wx:for="{{preview.rows}}" wx:key="id" class="row"><view class="row-main"><view class="row-title">{{item.date}} · {{item.range}}</view><view class="row-meta">{{item.vehicle}} · 预估 {{item.estimate}} kWh · 权重 {{item.weight}} kWh</view></view><view class="row-price">{{item.quantity}} kWh · ¥{{item.amount}}</view></view><view class="tiny" wx:if="{{!preview.rows.length}}">这段时间没有可分摊的家充记录。</view><view class="notice" wx:for="{{preview.warnings}}" wx:key="*this">{{item}}</view></view></block>
 <view class="section"><text class="section-title">账单</text></view>
 <view wx:if="{{!bills.length}}" class="empty"><view class="muted">还没有录入账单。账单覆盖到的家充会变成实际值，没覆盖到的继续待对账。</view></view>

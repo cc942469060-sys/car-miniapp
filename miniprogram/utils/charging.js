@@ -193,8 +193,10 @@ function estimateHomeCharge(input, vehicle, k, home) {
     '充电后电量需要是 0–100 的整数'
   );
   D.assert(socBefore == null || socAfter == null || socBefore < socAfter, '充电后电量需要高于充电前电量');
+  // An end time derived by an earlier estimate is not the user's reading: it is derived again from the new estimate.
   const chargerKw100 = (home && home.chargerKw100) || 0,
-    given = input.endTime != null && input.endTime !== '' && D.minutes(input.endTime) != null;
+    given =
+      input.endEstimated !== true && input.endTime != null && input.endTime !== '' && D.minutes(input.endTime) != null;
   let end = given ? D.minutes(input.endTime) : null;
   if (end != null && end <= start) end += DAY;
   D.assert(
@@ -265,12 +267,15 @@ function allocateBill(bill, records, tariffs) {
       weight100 = inRange.reduce((s, x) => s + x.quantity100, 0);
     let manualQuantity100 = 0,
       manualCents = 0;
+    // A confirmed charge is spread over its whole window first, so a charge across midnight only takes the part that
+    // falls in this bill's dates, not its full quantity from each daily bill.
     if (r.settle === 'manual') {
       const parts = largestRemainder(
         r.quantity100 || 0,
-        inRange.map(s => s.minutes)
+        slice.segments.map(s => s.minutes)
       );
-      inRange.forEach((s, i) => {
+      slice.segments.forEach((s, i) => {
+        if (s.date < bill.from || s.date > bill.to) return;
         manualQuantity100 += parts[i];
         manualCents += Math.round((parts[i] * s.price10000) / 10000);
       });
@@ -357,14 +362,13 @@ function settleAll(state) {
             return bill && date >= bill.from && date <= bill.to;
           })
         );
+    // `confirmed` is the user's own answer to 「上次以来的充电都已记录」 and is never changed by settlement.
     if (covered) {
       r.settle = 'bill';
-      r.confirmed = true;
       r.quantity100 = r.alloc.reduce((s, a) => s + a.quantity100, 0);
       r.cents = r.alloc.reduce((s, a) => s + a.cents, 0);
     } else {
       r.settle = 'pending';
-      r.confirmed = false;
       r.quantity100 = null;
       r.cents = null;
     }
@@ -443,7 +447,7 @@ function normalizeBill(input, bills, existing, home) {
       ? (D.assert(input.quantity100 > 0, '账单电量请填写大于 0 的数字'), input.quantity100)
       : D.fixed(input.quantity, '账单电量', true),
     cents = Number.isSafeInteger(input.cents)
-      ? input.cents
+      ? (D.assert(input.cents >= 0 && input.cents <= 999999999, '账单金额超出范围'), input.cents)
       : input.amount === '' || input.amount == null
         ? null
         : D.fixed(input.amount, '账单金额'),

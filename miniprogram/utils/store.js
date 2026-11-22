@@ -263,7 +263,9 @@ function createStore(storage) {
         const v = s.vehicles.find(x => x.id === input.vehicleId);
         // Estimate first: an estimated record has to carry its quantity and amount into validation.
         const draft = Object.assign({}, input, { id: input.id || uid('r') });
-        if (draft.kind === 'charge' && draft.home === true && draft.settle !== 'bill') {
+        // Saving re-estimates every home charge, settled ones too, so a corrected time or charge level also corrects
+        // how its bills are shared.
+        if (draft.kind === 'charge' && draft.home === true) {
           const k = C.homeK(v, s.records, s.bills).k;
           try {
             const est = C.estimateHomeCharge(draft, v, k, s.home);
@@ -280,7 +282,7 @@ function createStore(storage) {
               draft.amount = D.money(est.estCents);
             }
           } catch (e) {
-            if (draft.settle !== 'manual') throw e;
+            if (draft.settle !== 'manual' && draft.settle !== 'bill') throw e;
           }
         }
         const r = D.normalizeRecord(draft, v);
@@ -295,9 +297,11 @@ function createStore(storage) {
           if (r.settle === 'pending' && s.home.meter === 'shared') r.settle = 'estimate';
           if (r.settle === 'estimate' && s.home.meter === 'dedicated') r.settle = 'pending';
           if (r.settle === 'pending' || r.settle === 'estimate') D.assert(s.home.meter, '请先在家充设置里选择电表类型');
+          // On a dedicated meter a confirmed charge is taken off its bills by time, so it needs its time window.
+          if (r.settle === 'manual' && s.home.meter === 'dedicated') D.assert(r.startTime, '请填写开始充电时间');
         }
         // Home charges keep an estimate next to the real values, so a bill can fill the gap later.
-        if (r.home && r.settle !== 'bill') {
+        if (r.home) {
           if (r.settle === 'estimate' && r.estQuantity100 && r.estCents != null) {
             r.quantity100 = r.estQuantity100;
             r.cents = r.estCents;
@@ -319,7 +323,8 @@ function createStore(storage) {
         if (old) s.records[s.records.indexOf(old)] = r;
         else s.records.push(r);
         D.validateTimeline(v, s.records);
-        if (r.home) C.settleAll(s);
+        // A charge that stops being a home charge gives its share of the bills back to the others.
+        if (r.home || (old && old.home)) C.settleAll(s);
         return r.id;
       });
     },

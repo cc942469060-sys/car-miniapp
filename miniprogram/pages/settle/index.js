@@ -71,16 +71,18 @@ Page(
     goHomeCharge() {
       wx.navigateTo({ url: '/pages/homecharge/index' });
     },
-    // A bill starts at the oldest charge still waiting, so one bill usually covers a whole electricity period.
+    // A new bill is one day, the oldest charge still waiting, which matches the grid app's daily usage. A longer bill
+    // is a deliberate choice of its end date, so one day's usage is never spread over a week of charges by mistake.
     openNewBill() {
       const pending = this.s.records
-        .filter(r => r.home && r.settle === 'pending')
-        .sort((a, b) => a.date.localeCompare(b.date));
+          .filter(r => r.home && r.settle === 'pending')
+          .sort((a, b) => a.date.localeCompare(b.date)),
+        day = pending.length ? pending[0].date : U.D.today();
       this.setData({
         form: {
           id: '',
-          from: pending.length ? pending[0].date : U.D.today(),
-          to: U.D.today(),
+          from: day,
+          to: day,
           quantity: '',
           amount: '',
           note: '',
@@ -137,8 +139,10 @@ Page(
     findBill() {
       return this.data.form.id ? this.s.bills.find(b => b.id === this.data.form.id) : null;
     },
+    // The split is always shown before a bill is saved: the first tap previews, the next one saves.
     saveBill() {
       if (this.data.saving) return;
+      if (!this.data.preview) return this.previewBill();
       this.setData({ saving: true });
       const id = U.guard(this, () => U.getStore().saveBill(this.data.form), {
         账单电量: 'quantity',
