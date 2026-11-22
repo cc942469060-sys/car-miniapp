@@ -103,7 +103,8 @@ test('电池容量只保存在可插电的车型上，范围 1–300 kWh', () =>
   assert.equal(store.read().vehicles.find(v => v.id === fuel).batteryKwh100, null);
   assert.equal(store.read().vehicles.find(v => v.id === ev).batteryKwh100, 6300);
   assert.throws(
-    () => store.saveVehicle({ name: '大电池', type: 'ev', baseDate: '2025-01-01', baseMileage: '0', batteryKwh: '301' }),
+    () =>
+      store.saveVehicle({ name: '大电池', type: 'ev', baseDate: '2025-01-01', baseMileage: '0', batteryKwh: '301' }),
     /电池容量需在 1–300 kWh 之间/
   );
 });
@@ -120,7 +121,17 @@ test('待对账的家充记录只存预估：结束时间按功率推算，电�
   });
   const r = store.read().records[0];
   assert.deepEqual(
-    [r.settle, r.quantity100, r.cents, r.endTime, r.endEstimated, r.estQuantity100, r.estCents, r.estMethod, r.estK10000],
+    [
+      r.settle,
+      r.quantity100,
+      r.cents,
+      r.endTime,
+      r.endEstimated,
+      r.estQuantity100,
+      r.estCents,
+      r.estMethod,
+      r.estK10000,
+    ],
     ['pending', null, null, '03:00', true, 3500, 1260, 'soc', 7000]
   );
   assert.equal(C.confidence(r, store.read()), 'estimate');

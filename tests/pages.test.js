@@ -785,7 +785,18 @@ test('所有页面含已绑定事件方法，导入模板可解析，空数据�
       result += '\n' + sources(path.resolve(path.dirname(file), m[1]));
     return result;
   }
-  for (const name of ['home', 'ledger', 'care', 'garage', 'stats', 'vehicle', 'entry', 'plan', 'settle', 'homecharge']) {
+  for (const name of [
+    'home',
+    'ledger',
+    'care',
+    'garage',
+    'stats',
+    'vehicle',
+    'entry',
+    'plan',
+    'settle',
+    'homecharge',
+  ]) {
     const p = loadPage(name);
     if (!['entry', 'plan'].includes(name)) assert.equal(p.data.error, '');
     const source = sources(path.resolve(__dirname, '../miniprogram/pages', name, 'index.wxml'));
@@ -901,4 +912,3 @@ test('共用总表按预估入账，不能录账单；关闭开关回到手动',
   assert.equal(raw.records[0].settle, 'manual');
   assert.equal(raw.records[0].cents, 800);
 });
-

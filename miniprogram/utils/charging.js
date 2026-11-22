@@ -61,9 +61,7 @@ function periodAt(periods, minuteOfDay) {
 }
 // The version in force on `date` is the newest one whose start date is not later.
 function tariffFor(date, tariffs) {
-  return (tariffs || [])
-    .filter(t => t.from && t.from <= date)
-    .sort((a, b) => b.from.localeCompare(a.from))[0];
+  return (tariffs || []).filter(t => t.from && t.from <= date).sort((a, b) => b.from.localeCompare(a.from))[0];
 }
 
 // Splits a charge into tariff segments at midnight and at every period start, then divides the energy by the time
@@ -102,7 +100,10 @@ function sliceByDayAndTariff(window, quantity100, tariffs) {
     }
     cursor = stop;
   }
-  const parts = largestRemainder(quantity100 || 0, segments.map(s => s.minutes)),
+  const parts = largestRemainder(
+      quantity100 || 0,
+      segments.map(s => s.minutes)
+    ),
     byDate = {},
     byLabel = {};
   let cents = 0;
@@ -163,7 +164,10 @@ function homeK(vehicle, records, bills) {
       if (k0 != null && (bill.quantity100 < 0.6 * k0 * pct || bill.quantity100 > 1.5 * k0 * pct)) return;
       samples.push({ billId: bill.id, to: bill.to, quantity100: bill.quantity100, pct, k, estimated });
     });
-  const recent = samples.slice().sort((a, b) => b.to.localeCompare(a.to)).slice(0, 8),
+  const recent = samples
+      .slice()
+      .sort((a, b) => b.to.localeCompare(a.to))
+      .slice(0, 8),
     totalQuantity = recent.reduce((s, x) => s + x.quantity100, 0),
     totalPct = recent.reduce((s, x) => s + x.pct, 0),
     k = recent.length >= 3 && totalPct > 0 ? round6(totalQuantity / totalPct) : k0,
@@ -180,16 +184,27 @@ function estimateHomeCharge(input, vehicle, k, home) {
   D.assert(start != null, '请填写开始充电时间');
   const socBefore = input.socBefore === '' || input.socBefore == null ? null : Number(input.socBefore),
     socAfter = input.socAfter === '' || input.socAfter == null ? null : Number(input.socAfter);
-  D.assert(socBefore == null || (Number.isInteger(socBefore) && socBefore >= 0 && socBefore <= 100), '充电前电量需要是 0–100 的整数');
-  D.assert(socAfter == null || (Number.isInteger(socAfter) && socAfter >= 0 && socAfter <= 100), '充电后电量需要是 0–100 的整数');
+  D.assert(
+    socBefore == null || (Number.isInteger(socBefore) && socBefore >= 0 && socBefore <= 100),
+    '充电前电量需要是 0–100 的整数'
+  );
+  D.assert(
+    socAfter == null || (Number.isInteger(socAfter) && socAfter >= 0 && socAfter <= 100),
+    '充电后电量需要是 0–100 的整数'
+  );
   D.assert(socBefore == null || socAfter == null || socBefore < socAfter, '充电后电量需要高于充电前电量');
   const chargerKw100 = (home && home.chargerKw100) || 0,
     given = input.endTime != null && input.endTime !== '' && D.minutes(input.endTime) != null;
   let end = given ? D.minutes(input.endTime) : null;
   if (end != null && end <= start) end += DAY;
-  D.assert(!given || (end - start >= 1 && end - start <= DAY), '充满时间需要晚于开始充电时间（跨零点时早于开始是正常的）');
+  D.assert(
+    !given || (end - start >= 1 && end - start <= DAY),
+    '充满时间需要晚于开始充电时间（跨零点时早于开始是正常的）'
+  );
   const socEst =
-      k != null && socBefore != null && socAfter != null && socAfter > socBefore ? Math.round(k * (socAfter - socBefore)) : null,
+      k != null && socBefore != null && socAfter != null && socAfter > socBefore
+        ? Math.round(k * (socAfter - socBefore))
+        : null,
     powerEst = given && chargerKw100 ? Math.round((chargerKw100 * (end - start)) / 60) : null,
     typed =
       input.estQuantity == null || input.estQuantity === ''
@@ -205,7 +220,14 @@ function estimateHomeCharge(input, vehicle, k, home) {
     end = start + Math.ceil((estQuantity100 * 60) / chargerKw100);
     D.assert(end - start <= DAY, '估算的充电时长超过 24 小时，请填写充满时间');
   }
-  const window = { date: input.date, start, end, minutes: end - start, crosses: end > DAY, endDate: D.dateAfter(input.date, end - 1) },
+  const window = {
+      date: input.date,
+      start,
+      end,
+      minutes: end - start,
+      crosses: end > DAY,
+      endDate: D.dateAfter(input.date, end - 1),
+    },
     slice = sliceByDayAndTariff(window, estQuantity100, (home && home.tariffs) || []);
   return {
     estQuantity100,
@@ -221,7 +243,10 @@ function estimateHomeCharge(input, vehicle, k, home) {
 
 // Cost of `quantity100` over a slice, using each segment's own price structure.
 function segmentCost(segments, quantity100) {
-  const parts = largestRemainder(quantity100 || 0, segments.map(s => s.minutes));
+  const parts = largestRemainder(
+    quantity100 || 0,
+    segments.map(s => s.minutes)
+  );
   return segments.reduce((s, seg, i) => s + Math.round((parts[i] * seg.price10000) / 10000), 0);
 }
 
@@ -241,7 +266,10 @@ function allocateBill(bill, records, tariffs) {
     let manualQuantity100 = 0,
       manualCents = 0;
     if (r.settle === 'manual') {
-      const parts = largestRemainder(r.quantity100 || 0, inRange.map(s => s.minutes));
+      const parts = largestRemainder(
+        r.quantity100 || 0,
+        inRange.map(s => s.minutes)
+      );
       inRange.forEach((s, i) => {
         manualQuantity100 += parts[i];
         manualCents += Math.round((parts[i] * s.price10000) / 10000);
@@ -257,14 +285,23 @@ function allocateBill(bill, records, tariffs) {
     totalWeight = others.reduce((s, c) => s + c.weight100, 0);
   if (bill.quantity100 < manualQuantity100) warnings.push('账单电量小于已确认记录合计，请核对');
   if (!totalWeight && remaining > 50) warnings.push('这段时间有用电，但没有对应的家充记录，可能漏记');
-  const quantities = totalWeight > 0 ? largestRemainder(remaining, others.map(c => c.weight100)) : others.map(() => 0),
+  const quantities =
+      totalWeight > 0
+        ? largestRemainder(
+            remaining,
+            others.map(c => c.weight100)
+          )
+        : others.map(() => 0),
     leftCents = bill.cents == null ? null : Math.max(0, bill.cents - manualCents);
   if (leftCents != null && bill.cents < manualCents) warnings.push('账单金额小于已确认记录合计，请核对');
   const costs =
     leftCents == null
       ? others.map((c, i) => segmentCost(c.inRange, quantities[i]))
       : totalWeight > 0
-        ? largestRemainder(leftCents, others.map(c => c.weight100))
+        ? largestRemainder(
+            leftCents,
+            others.map(c => c.weight100)
+          )
         : others.map(() => 0);
   const rows = candidates.map(c => {
     const i = others.indexOf(c);
@@ -342,8 +379,7 @@ function confidence(record, state) {
   const bills = [...new Set((record.alloc || []).map(a => a.billId))],
     records = (state && state.records) || [];
   const only =
-    bills.length > 0 &&
-    bills.every(id => records.filter(r => (r.alloc || []).some(a => a.billId === id)).length === 1);
+    bills.length > 0 && bills.every(id => records.filter(r => (r.alloc || []).some(a => a.billId === id)).length === 1);
   return only ? 'actual' : 'allocated';
 }
 function confidenceText(value) {
@@ -412,10 +448,7 @@ function normalizeBill(input, bills, existing, home) {
         ? null
         : D.fixed(input.amount, '账单金额'),
     others = (bills || []).filter(b => !existing || b.id !== existing.id);
-  D.assert(
-    !others.some(b => !(input.to < b.from || input.from > b.to)),
-    '账单日期与已有账单重叠，请先核对'
-  );
+  D.assert(!others.some(b => !(input.to < b.from || input.from > b.to)), '账单日期与已有账单重叠，请先核对');
   return {
     id: existing ? existing.id : input.id,
     from: input.from,

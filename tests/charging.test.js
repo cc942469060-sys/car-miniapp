@@ -46,7 +46,14 @@ function charge(id, input, state) {
     cents: null,
   };
 }
-const bill = (id, from, to, quantity100, cents) => ({ id, from, to, quantity100, cents: cents == null ? null : cents, note: '' });
+const bill = (id, from, to, quantity100, cents) => ({
+  id,
+  from,
+  to,
+  quantity100,
+  cents: cents == null ? null : cents,
+  note: '',
+});
 const sum = (rows, key) => rows.reduce((s, row) => s + row[key], 0);
 
 test('最大余数法：多的份额按小数部分从大到小、同分按输入顺序分配', () => {
@@ -143,12 +150,7 @@ test('跨零点的谷段（22:00–08:00）在 01:00–05:00 全算谷段；新�
     { id: 't1', from: '2025-01-01', periods: [{ start: '00:00', label: 'flat', price10000: 6000 }] },
     { id: 't2', from: '2025-11-21', periods: [{ start: '00:00', label: 'flat', price10000: 9000 }] },
   ]);
-  const two = C.estimateHomeCharge(
-    { date: '2025-11-20', startTime: '22:00', endTime: '02:00' },
-    VEHICLE,
-    70,
-    raised
-  );
+  const two = C.estimateHomeCharge({ date: '2025-11-20', startTime: '22:00', endTime: '02:00' }, VEHICLE, 70, raised);
   assert.deepEqual(
     two.slice.segments.map(x => [x.date, x.price10000]),
     [
@@ -164,12 +166,7 @@ test('没有电价版本时报错；手填估计电量与功率法按优先级�
     () => C.estimateHomeCharge({ date: '2025-11-20', startTime: '22:00', estQuantity: '10' }, VEHICLE, 70, home([])),
     /请先在家充设置里填写电价/
   );
-  const typed = C.estimateHomeCharge(
-    { date: '2025-11-20', startTime: '22:00', estQuantity: '10' },
-    VEHICLE,
-    70,
-    HOME
-  );
+  const typed = C.estimateHomeCharge({ date: '2025-11-20', startTime: '22:00', estQuantity: '10' }, VEHICLE, 70, HOME);
   assert.equal(typed.estMethod, 'typed');
   assert.equal(typed.estQuantity100, 1000);
   assert.equal(typed.endTime, '23:26');
@@ -266,10 +263,7 @@ test('再录账单 11-20 14.50 kWh 后，A 被两张账单覆盖成为已对账�
   assert.equal(C.confidence(a, state), 'allocated');
   assert.equal(C.confidence(b, state), 'estimate');
   // 14.50 kWh over the flat and valley half of 11-20: 7.25 × 0.60 + 7.25 × 0.30 = 4.35 + 2.18.
-  assert.deepEqual(
-    [a.alloc[0].cents, a.alloc[1].cents],
-    [653, 693]
-  );
+  assert.deepEqual([a.alloc[0].cents, a.alloc[1].cents], [653, 693]);
 });
 
 test('账单有金额时按权重精确分配，合计等于账单金额；删除账单后回到待对账', () => {

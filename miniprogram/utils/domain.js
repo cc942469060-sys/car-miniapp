@@ -398,9 +398,7 @@ function statistics(records, period) {
     }));
   const others = OTHER_CATEGORIES.map(name => ({
     name,
-    cents: filtered
-      .filter(r => r.kind === 'other' && (r.category || '其他') === name)
-      .reduce((s, r) => s + r.cents, 0),
+    cents: filtered.filter(r => r.kind === 'other' && (r.category || '其他') === name).reduce((s, r) => s + r.cents, 0),
   })).filter(x => x.cents);
   return {
     total: filtered.reduce((s, r) => s + effectiveCents(r), 0),

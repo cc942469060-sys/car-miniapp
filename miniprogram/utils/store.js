@@ -294,8 +294,7 @@ function createStore(storage) {
         if (r.home && r.settle !== 'bill') {
           if (r.settle === 'pending' && s.home.meter === 'shared') r.settle = 'estimate';
           if (r.settle === 'estimate' && s.home.meter === 'dedicated') r.settle = 'pending';
-          if (r.settle === 'pending' || r.settle === 'estimate')
-            D.assert(s.home.meter, '请先在家充设置里选择电表类型');
+          if (r.settle === 'pending' || r.settle === 'estimate') D.assert(s.home.meter, '请先在家充设置里选择电表类型');
         }
         // Home charges keep an estimate next to the real values, so a bill can fill the gap later.
         if (r.home && r.settle !== 'bill') {
@@ -357,10 +356,7 @@ function createStore(storage) {
     saveHome(input) {
       return change(s => {
         const home = C.normalizeHome(input);
-        D.assert(
-          !(home.meter === 'shared' && s.bills.length),
-          '已录过账单，不能切换到共用总表；请先删除账单'
-        );
+        D.assert(!(home.meter === 'shared' && s.bills.length), '已录过账单，不能切换到共用总表；请先删除账单');
         home.tariffs = s.home.tariffs;
         s.records.forEach(r => {
           if (!r.home) return;
@@ -398,7 +394,10 @@ function createStore(storage) {
     },
     deleteTariff(id) {
       return change(s => {
-        D.assert(s.home.tariffs.some(t => t.id === id), '电价版本不存在');
+        D.assert(
+          s.home.tariffs.some(t => t.id === id),
+          '电价版本不存在'
+        );
         const rest = s.home.tariffs.filter(t => t.id !== id);
         s.records.forEach(r => {
           if (!r.home || (r.settle !== 'pending' && r.settle !== 'estimate')) return;
@@ -429,7 +428,10 @@ function createStore(storage) {
     },
     deleteBill(id) {
       return change(s => {
-        D.assert(s.bills.some(b => b.id === id), '账单不存在');
+        D.assert(
+          s.bills.some(b => b.id === id),
+          '账单不存在'
+        );
         s.bills = s.bills.filter(b => b.id !== id);
         C.settleAll(s);
       });
