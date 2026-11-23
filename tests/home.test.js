@@ -248,20 +248,17 @@ test('切换电表类型时预估记录在 estimate 与 pending 间转换', () =
   assert.deepEqual([r.settle, r.quantity100, r.cents], ['estimate', 3500, 1260]);
 });
 
-test('删除电价版本前先检查是否还有记录或账单需要它', () => {
+test('已有家充记录和账单时删除自定义电价可回退到内置电价', () => {
   const { store } = fixture(),
     id = car(store);
   home(store);
   const tariff = store.read().home.tariffs[0];
   homeRecord(store, id, { date: '2025-11-20', startTime: '22:00', socBefore: '30', socAfter: '80' });
-  assert.throws(() => store.deleteTariff(tariff.id), /有家充记录将没有适用电价/);
   store.saveBill({ from: '2025-11-20', to: '2025-11-20', quantity: '14.50', amount: '' });
-  store.deleteRecord(store.read().records[0].id);
-  assert.throws(() => store.deleteTariff(tariff.id), /有账单将没有适用电价/);
-  // With an amount on the bill, the tariff is no longer needed to cost it.
-  const bill = store.read().bills[0];
-  store.saveBill({ id: bill.id, from: bill.from, to: bill.to, quantity: '14.50', amount: '8.70' });
-  assert.doesNotThrow(() => store.deleteTariff(tariff.id));
+  store.deleteTariff(tariff.id);
+  assert.equal(store.read().home.tariffs.length, 0);
+  assert.equal(store.read().bills.length, 1);
+  assert.equal(store.read().records.length, 1);
 });
 
 test('备份导出再恢复后分摊按账单重算，旧版备份也能恢复', () => {

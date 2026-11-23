@@ -13,7 +13,7 @@
 <view wx:for="{{kRows}}" wx:key="id" class="card"><view class="row"><view class="row-main"><view class="row-title">{{item.name}}</view><view class="row-meta">{{item.source}}{{item.mae ? ' · ' + item.mae : ''}}</view></view><view class="row-price">{{item.k}} kWh</view></view></view>
 <view class="tiny">默认按电池标称容量 ÷ 90% 充电效率估算。录过 3 张以上账单后，改用账单电量与实际充电幅度校准。</view>
 <view class="section"><text class="section-title">电价版本</text></view>
-<view class="muted">每段从开始时间生效，直到下一段开始；最后一段跨零点接回第一段。某天用生效日期不晚于该天的最新版本。</view>
+<view class="muted">默认沿用山东 2026 年居民充电桩峰谷电价，每年按月份自动切换。自定义电价从生效日起优先使用。</view>
 <view class="actions"><button class="secondary" bindtap="addTariff">新增版本</button><button class="quiet" bindtap="addTariff" data-copy="1">复制生效中</button></view>
 <block wx:if="{{editing}}">
 <view class="card"><view class="row-title">{{form.id ? '编辑电价版本' : '新增电价版本'}}</view>
@@ -24,6 +24,6 @@
 <view class="actions"><button class="quiet" bindtap="cancelTariff">取消</button><button class="primary" loading="{{saving}}" bindtap="saveTariff">保存电价</button></view>
 </view>
 </block>
-<view wx:if="{{!tariffs.length}}" class="empty"><view class="muted">还没有电价版本。家充估算需要至少一个版本。</view></view>
+<view wx:if="{{!tariffs.length}}" class="empty"><view class="muted">尚未添加自定义电价。</view></view>
 <view wx:for="{{tariffs}}" wx:key="id" class="card"><view class="row"><view class="row-main"><view class="row-title">{{item.from}} 起</view><view class="row-meta">{{item.text}}</view></view></view><view class="actions"><button class="quiet" data-id="{{item.id}}" bindtap="editTariff">编辑</button><button class="quiet" data-id="{{item.id}}" bindtap="deleteTariff">删除</button></view></view>
 <view class="footer-note">电价填 0.0001–5 之间的数字，最多四位小数，按元/kWh。没有电表类型时只能按手动填写的实际值记录家充。</view></view>

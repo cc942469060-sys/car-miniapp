@@ -78,7 +78,7 @@ Page(
     // A new version either starts from today with one flat period, or copies the prices in effect now.
     addTariff(e) {
       const copy = e.currentTarget.dataset.copy === '1',
-        current = this.data.tariffs.map(t => this.sTariff(t.id)).find(t => t && t.from <= this.data.today);
+        current = C.tariffFor(this.data.today, U.getStore().read().home.tariffs);
       const periods =
         copy && current
           ? current.periods.map(p => ({
@@ -156,7 +156,7 @@ Page(
       }
     },
     deleteTariff(e) {
-      U.confirm('删除这个电价版本？删除后，用到它的家充记录或账单会没有价格可用。', () =>
+      U.confirm('删除这个电价版本？删除后，对应日期将使用其他已生效的自定义电价或内置电价。', () =>
         U.guard(this, () => {
           U.getStore().deleteTariff(e.currentTarget.dataset.id);
           wx.showToast({ title: '已删除', icon: 'success' });

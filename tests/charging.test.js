@@ -161,11 +161,14 @@ test('跨零点的谷段（22:00–08:00）在 01:00–05:00 全算谷段；新�
   assert.equal(two.slice.cents, 2100);
 });
 
-test('没有电价版本时报错；手填估计电量与功率法按优先级取值', () => {
-  assert.throws(
-    () => C.estimateHomeCharge({ date: '2025-11-20', startTime: '22:00', estQuantity: '10' }, VEHICLE, 70, home([])),
-    /请先在家充设置里填写电价/
+test('没有自定义电价时使用内置电价；手填估计电量与功率法按优先级取值', () => {
+  const estimate = C.estimateHomeCharge(
+    { date: '2025-11-20', startTime: '22:00', estQuantity: '10' },
+    VEHICLE,
+    70,
+    home([])
   );
+  assert.ok(estimate.slice.cents > 0);
   const typed = C.estimateHomeCharge({ date: '2025-11-20', startTime: '22:00', estQuantity: '10' }, VEHICLE, 70, HOME);
   assert.equal(typed.estMethod, 'typed');
   assert.equal(typed.estQuantity100, 1000);
@@ -329,4 +332,44 @@ test('对账后费用、能耗与统计都改用分摊到的实际电量', () =>
   assert.equal(stats.total, 2100);
   assert.equal(stats.charge, 7000);
   assert.equal(stats.estimatedCents, 0);
+});
+
+test('山东 2026 内置电价逐小时与全年分时表一致', () => {
+  const prices = { A: 3850, B: 5550, C: 5850, D: 8880, E: 2220 };
+  const seasons = [
+    [[1, 2, 12], 'AAAAAAA CC B A EEE A B DDD CC BB A'],
+    [[3, 4, 5], 'AAAAAAA BBB A EEE A BB DDD CC B A'],
+    [[6], 'AAAAAAAAAAAA BBBB C DDDDD C A'],
+    [[7, 8], 'AAAAAAA BBBBBBBBB C DDDDD C A'],
+    [[9, 10, 11], 'AAAAAAA BBB A EEE A B C DD CC BB A'],
+  ];
+  for (const [months, row] of seasons) {
+    for (const month of months) {
+      const date = '2026-' + String(month).padStart(2, '0') + '-01';
+      const hours = row.replace(/ /g, '');
+      assert.equal(hours.length, 24);
+      for (let hour = 0; hour < 24; hour++) {
+        const window = { date, start: hour * 60, end: (hour + 1) * 60 };
+        assert.equal(C.sliceByDayAndTariff(window, 100, []).segments[0].price10000, prices[hours[hour]]);
+      }
+    }
+  }
+});
+
+test('跨月家充采用次日费率，允许保存 11 段自定义电价', () => {
+  const window = { date: '2026-05-31', start: 23 * 60, end: 1440 + 8 * 60 };
+  assert.deepEqual(
+    C.sliceByDayAndTariff(window, 900, []).segments.map(s => s.price10000),
+    [3850, 3850]
+  );
+  const winter = C.normalizeTariff(C.tariffFor('2026-12-01', []), [], null);
+  assert.equal(winter.periods.length, 11);
+  assert.equal(C.tariffFor('2026-10-01', [{ ...winter, from: '2025-01-01' }]).from, '2025-01-01');
+  const crossYear = { date: '2026-12-31', start: 1380, end: 1920 };
+  assert.deepEqual(
+    C.sliceByDayAndTariff(crossYear, 900, []).segments.map(s => s.price10000),
+    [3850, 3850, 5850]
+  );
+  assert.equal(C.tariffFor('2027-01-01', []).from, '2027-01-01');
+  assert.equal(C.tariffFor('2035-10-01', []).from, '2035-09-01');
 });

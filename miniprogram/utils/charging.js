@@ -1,9 +1,10 @@
 // Home charging: estimated energy from state of charge or charger power, tariff slicing, and bill settlement.
 // Everything here is a pure function over plain data; the store validates and writes, pages only render.
 const D = require('./domain');
+const { presetTariffFor } = require('./shandong-tariff');
 const DAY = 1440;
-const LABELS = { valley: '谷段', flat: '平段', peak: '峰段', sharp: '尖峰' };
-const LABEL_IDS = ['valley', 'flat', 'peak', 'sharp'];
+const LABELS = { valley: '谷段', flat: '平段', peak: '峰段', sharp: '尖峰', deepValley: '深谷' };
+const LABEL_IDS = ['valley', 'flat', 'peak', 'sharp', 'deepValley'];
 const CONFIDENCE = { actual: '实际', allocated: '分摊', estimate: '预估' };
 const round6 = x => Math.round(x * 1e6) / 1e6;
 
@@ -61,7 +62,8 @@ function periodAt(periods, minuteOfDay) {
 }
 // The version in force on `date` is the newest one whose start date is not later.
 function tariffFor(date, tariffs) {
-  return (tariffs || []).filter(t => t.from && t.from <= date).sort((a, b) => b.from.localeCompare(a.from))[0];
+  const custom = (tariffs || []).filter(t => t.from && t.from <= date).sort((a, b) => b.from.localeCompare(a.from))[0];
+  return custom || presetTariffFor(date);
 }
 
 // Splits a charge into tariff segments at midnight and at every period start, then divides the energy by the time
@@ -416,7 +418,6 @@ function normalizeTariff(input, tariffs, existing) {
   const others = (tariffs || []).filter(t => !existing || t.id !== existing.id);
   D.assert(!others.some(t => t.from === input.from), '电价生效日期与已有版本重复');
   D.assert(Array.isArray(input.periods) && input.periods.length, '电价至少需要一段');
-  D.assert(input.periods.length <= 8, '电价时段最多 8 段');
   const seen = new Set();
   const periods = input.periods
     .map(p => {
