@@ -391,11 +391,27 @@ function confidence(record, state) {
 function confidenceText(value) {
   return CONFIDENCE[value] || '';
 }
-// Share of the charge already covered by bills, for 「已对账 60%」.
-function allocatedPercent(record) {
-  if (!record.estQuantity100) return 0;
-  const covered = (record.alloc || []).reduce((s, a) => s + a.quantity100, 0);
-  return Math.max(0, Math.min(100, Math.round((covered / record.estQuantity100) * 100)));
+// How much of a charge's time the bills cover, and which dates still need one. A charge becomes 已对账 only once
+// every date it touches is covered, so a charge across midnight needs the next day's bill too. The share is by time,
+// not by energy: a bill that gives a charge its whole estimate still leaves it waiting for the other date.
+function billCoverage(record, bills) {
+  const w = chargeWindow(record);
+  if (!w) return { percent: 0, missing: [], dates: [] };
+  const list = bills || [],
+    dates = coveredDates(record),
+    covered = list.reduce((s, b) => s + (intersectsBill(record, b) ? overlapMinutes(w, b.from, b.to) : 0), 0);
+  return {
+    percent: Math.max(0, Math.min(100, Math.round((covered / w.minutes) * 100))),
+    missing: dates.filter(date => !list.some(b => date >= b.from && date <= b.to)),
+    dates,
+  };
+}
+function allocatedPercent(record, bills) {
+  return billCoverage(record, bills).percent;
+}
+// 「还缺 11-21 的账单」, with month and day only.
+function missingText(missing) {
+  return missing.length ? `还缺 ${missing.map(d => d.slice(5)).join('、')} 的账单` : '';
 }
 
 function price10000(value) {
@@ -488,7 +504,9 @@ module.exports = {
   settleAll,
   confidence,
   confidenceText,
+  billCoverage,
   allocatedPercent,
+  missingText,
   price10000,
   normalizeHome,
   normalizeTariff,

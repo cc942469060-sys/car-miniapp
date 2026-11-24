@@ -200,7 +200,7 @@ test('录入账单后自动分摊：电量与金额按预估权重拆分，覆�
     ra.alloc.map(x => [x.quantity100, x.cents]),
     [[2310, 693]]
   );
-  assert.equal(C.allocatedPercent(ra), 66);
+  assert.equal(C.allocatedPercent(ra, s.bills), 60);
   store.saveBill({ from: '2025-11-20', to: '2025-11-20', quantity: '14.50', amount: '', note: '' });
   s = store.read();
   ra = s.records.find(r => r.id === a);

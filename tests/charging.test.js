@@ -240,8 +240,11 @@ test('账单 11-21 30.80 kWh 按预估权重分给两笔记录，都不足覆盖
   assert.equal(a.settle, 'pending');
   assert.equal(a.quantity100, null);
   assert.equal(b.settle, 'pending');
-  assert.equal(C.allocatedPercent(a), 66);
-  assert.equal(C.allocatedPercent(b), 37);
+  // By time: a runs 22:00–03:00 and the bill covers its 3 hours on 11-21; b covers 1 of its 3 hours.
+  assert.equal(C.allocatedPercent(a, state.bills), 60);
+  assert.equal(C.allocatedPercent(b, state.bills), 33);
+  assert.deepEqual(C.billCoverage(a, state.bills).missing, ['2025-11-20']);
+  assert.equal(C.missingText(C.billCoverage(b, state.bills).missing), '还缺 11-22 的账单');
   assert.equal(C.confidence(a, state), 'estimate');
   assert.equal(C.confidenceText(C.confidence(a, state)), '预估');
 });

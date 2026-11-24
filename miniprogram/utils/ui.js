@@ -20,12 +20,14 @@ function recordView(r, rates, state) {
   view.priceText = (D.isEstimated(r) ? '预估 ' : '') + '¥' + view.amount;
   view.confidence = confidence === 'actual' ? '' : C.confidenceText(confidence);
   view.pending = r.home && r.settle === 'pending';
-  view.allocated = r.home ? C.allocatedPercent(r) : 0;
+  const coverage = r.home && r.settle === 'pending' ? C.billCoverage(r, (state && state.bills) || []) : null;
+  view.allocated = coverage ? coverage.percent : 0;
+  view.missing = coverage ? C.missingText(coverage.missing) : '';
   if (r.home)
     view.detail = [
       price,
       rates && rates[r.id],
-      r.settle === 'pending' ? '待对账' + (view.allocated ? `（已对账 ${view.allocated}%）` : '') : '',
+      r.settle === 'pending' ? '待对账' + (view.allocated ? `（已对账 ${view.allocated}%，${view.missing}）` : '') : '',
     ]
       .filter(Boolean)
       .join(' · ');
