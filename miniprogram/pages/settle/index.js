@@ -31,7 +31,8 @@ Page(
           meterText:
             s.home.meter === 'dedicated' ? '独立电表' : s.home.meter === 'shared' ? '共用总表' : '未设置电表类型',
           pending: pending.map(r => {
-            const w = C.chargeWindow(r);
+            const w = C.chargeWindow(r),
+              coverage = C.billCoverage(r, s.bills);
             return {
               id: r.id,
               date: r.date,
@@ -39,7 +40,8 @@ Page(
               vehicle: vehicles.get(r.vehicleId) || '',
               quantity: r.estQuantity100 ? (r.estQuantity100 / 100).toFixed(2) : '',
               amount: U.D.money(r.estCents),
-              allocated: C.allocatedPercent(r),
+              allocated: coverage.percent,
+              missing: C.missingText(coverage.missing),
             };
           }),
           pendingAmount: U.D.money(pending.reduce((sum, r) => sum + (r.estCents || 0), 0)),
@@ -71,18 +73,21 @@ Page(
     goHomeCharge() {
       wx.navigateTo({ url: '/pages/homecharge/index' });
     },
-    // A new bill is one day, the oldest charge still waiting, which matches the grid app's daily usage. A longer bill
-    // is a deliberate choice of its end date, so one day's usage is never spread over a week of charges by mistake.
+    // A new bill covers the dates of the oldest charge still waiting that no bill covers yet: one day, or two for a
+    // charge across midnight, so saving it settles that charge. A longer bill is a deliberate choice of its end date.
     openNewBill() {
-      const pending = this.s.records
+      const today = U.D.today(),
+        oldest = this.s.records
           .filter(r => r.home && r.settle === 'pending')
-          .sort((a, b) => a.date.localeCompare(b.date)),
-        day = pending.length ? pending[0].date : U.D.today();
+          .sort((a, b) => a.date.localeCompare(b.date) || (a.startTime || '').localeCompare(b.startTime || ''))[0],
+        missing = oldest ? C.billCoverage(oldest, this.s.bills).missing.filter(d => d <= today) : [],
+        from = missing.length ? missing[0] : oldest ? oldest.date : today,
+        to = missing.length ? missing[missing.length - 1] : from;
       this.setData({
         form: {
           id: '',
-          from: day,
-          to: day,
+          from,
+          to,
           quantity: '',
           amount: '',
           note: '',
@@ -114,6 +119,8 @@ Page(
           result = C.allocateBill(bill, this.s.records, this.s.home.tariffs),
           vehicles = new Map(this.s.vehicles.map(v => [v.id, v.name]));
         this.pendingBill = bill;
+        // What each charge looks like once this bill is saved: settled, or still waiting for another date.
+        const after = this.s.bills.filter(b => !this.data.form.id || b.id !== this.data.form.id).concat([bill]);
         this.setData({
           error: '',
           preview: {
@@ -129,6 +136,12 @@ Page(
                 weight: (row.weight100 / 100).toFixed(2),
                 quantity: (row.quantity100 / 100).toFixed(2),
                 amount: U.D.money(row.cents),
+                after:
+                  r.settle === 'manual'
+                    ? '已手填实际值，只从账单中扣除'
+                    : (missing => (missing ? `保存后仍待对账：${missing}` : '保存后转为实际'))(
+                        C.missingText(C.billCoverage(r, after).missing)
+                      ),
               };
             }),
             warnings: result.warnings.map(w => w.message),

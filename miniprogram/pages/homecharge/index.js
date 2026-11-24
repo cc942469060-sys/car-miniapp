@@ -1,5 +1,8 @@
 const U = require('../../utils/ui');
 const C = require('../../utils/charging');
+const P = require('../../utils/shandong-tariff');
+const periodText = periods =>
+  periods.map(p => `${p.start} ${C.LABELS[p.label]} ${(p.price10000 / 10000).toFixed(4)}`).join(' · ');
 Page(
   Object.assign({}, U.common, {
     data: {
@@ -9,6 +12,9 @@ Page(
       chargerKw: '',
       today: '',
       tariffs: [],
+      presetName: P.PRESET_NAME,
+      presets: [],
+      presetNote: '',
       kRows: [],
       labels: C.LABEL_IDS.map(id => ({ id, name: C.LABELS[id] })),
       editing: false,
@@ -27,9 +33,7 @@ Page(
           .map(t => ({
             id: t.id,
             from: t.from,
-            text: t.periods
-              .map(p => `${p.start} ${C.LABELS[p.label]} ${(p.price10000 / 10000).toFixed(4)}`)
-              .join(' · '),
+            text: periodText(t.periods),
           })),
         kRows = s.vehicles
           .filter(v => U.D.typeOf(v).charge)
@@ -43,9 +47,23 @@ Page(
               mae: k.mae == null ? '' : `平均偏差 ${(k.mae * 100).toFixed(0)}%`,
             };
           });
+      // The built-in schedules of this year. One of them is in force today unless a custom version overrides it.
+      const today = U.D.today(),
+        month = Number(today.slice(5, 7)),
+        custom = s.home.tariffs.filter(t => t.from <= today).sort((a, b) => b.from.localeCompare(a.from))[0],
+        presets = P.presetSchedules(today.slice(0, 4)).map(p => ({
+          from: p.from,
+          months: p.months,
+          text: periodText(p.periods),
+          current: !custom && month >= p.firstMonth && month <= p.lastMonth,
+        }));
       this.setData({
         ready: true,
-        today: U.D.today(),
+        today,
+        presets,
+        presetNote: custom
+          ? `今天使用的是 ${custom.from} 起的自定义电价；没有自定义电价覆盖的日期仍按下面的默认电价。`
+          : '今天使用的是下面标为「生效中」的默认电价。',
         meter: s.home.meter,
         meterText: s.home.meter === 'dedicated' ? '独立电表' : s.home.meter === 'shared' ? '共用总表' : '未设置',
         chargerKw: (s.home.chargerKw100 / 100).toFixed(2),

@@ -24,6 +24,10 @@
 <view class="actions"><button class="quiet" bindtap="cancelTariff">取消</button><button class="primary" loading="{{saving}}" bindtap="saveTariff">保存电价</button></view>
 </view>
 </block>
-<view wx:if="{{!tariffs.length}}" class="empty"><view class="muted">尚未添加自定义电价。</view></view>
+<view wx:if="{{!tariffs.length}}" class="empty"><view class="muted">尚未添加自定义电价，使用下面的默认电价。</view></view>
 <view wx:for="{{tariffs}}" wx:key="id" class="card"><view class="row"><view class="row-main"><view class="row-title">{{item.from}} 起</view><view class="row-meta">{{item.text}}</view></view></view><view class="actions"><button class="quiet" data-id="{{item.id}}" bindtap="editTariff">编辑</button><button class="quiet" data-id="{{item.id}}" bindtap="deleteTariff">删除</button></view></view>
+<view class="section"><text class="section-title">默认电价</text></view>
+<view class="muted">{{presetName}}，每年按月份自动切换，不能修改；需要不同的价格时，用「复制生效中」新增一个自定义版本。</view>
+<view class="tiny">{{presetNote}}</view>
+<view wx:for="{{presets}}" wx:key="from" class="card"><view class="row"><view class="row-main"><view class="row-title">{{item.months}}<text wx:if="{{item.current}}" class="tag">生效中</text></view><view class="row-meta">{{item.text}}</view></view></view></view>
 <view class="footer-note">电价填 0.0001–5 之间的数字，最多四位小数，按元/kWh。没有电表类型时只能按手动填写的实际值记录家充。</view></view>

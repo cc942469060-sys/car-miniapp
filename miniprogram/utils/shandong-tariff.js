@@ -123,4 +123,16 @@ function presetTariffFor(date) {
   };
 }
 
-module.exports = { presetTariffFor };
+// Every built-in schedule of `year`, with the months it covers, for showing the default prices in the settings.
+function presetSchedules(year) {
+  return MONTH_THRESHOLDS.map((entry, i) => {
+    const last = i + 1 < MONTH_THRESHOLDS.length ? MONTH_THRESHOLDS[i + 1].month - 1 : 12;
+    return Object.assign(presetTariffFor(`${year}-${String(entry.month).padStart(2, '0')}-01`), {
+      months: entry.month === last ? `${entry.month} 月` : `${entry.month}–${last} 月`,
+      firstMonth: entry.month,
+      lastMonth: last,
+    });
+  });
+}
+
+module.exports = { presetTariffFor, presetSchedules, PRESET_NAME: '山东居民充电桩峰谷电价（2026）' };

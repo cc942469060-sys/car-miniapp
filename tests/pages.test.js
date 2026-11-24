@@ -912,7 +912,7 @@ test('共用总表按预估入账，不能录账单；关闭开关回到手动',
   assert.equal(raw.records[0].settle, 'manual');
   assert.equal(raw.records[0].cents, 800);
 });
-test('新账单默认只覆盖最早一条待对账记录的那一天；第一次点保存只预览', () => {
+test('新账单默认覆盖最早一条待对账记录跨过的日期；第一次点保存只预览', () => {
   const id = createCar('ev'),
     v = loadPage('vehicle', { id });
   v.setData({ 'form.batteryKwh': '63' });
@@ -933,10 +933,12 @@ test('新账单默认只覆盖最早一条待对账记录的那一天；第一�
   assert.equal(entry.data.error, '');
   const settle = loadPage('settle');
   settle.openNewBill();
-  assert.deepEqual([settle.data.form.from, settle.data.form.to], ['2025-11-20', '2025-11-20']);
-  settle.setData({ 'form.to': '2025-11-21', 'form.quantity': '35.00' });
+  // The 22:00 charge runs past midnight, so the default bill covers both of its dates and settles it.
+  assert.deepEqual([settle.data.form.from, settle.data.form.to], ['2025-11-20', '2025-11-21']);
+  settle.setData({ 'form.quantity': '35.00' });
   settle.saveBill();
   assert.equal(settle.data.preview.rows.length, 1);
+  assert.equal(settle.data.preview.rows[0].after, '保存后转为实际');
   assert.equal((raw.bills || []).length, 0);
   settle.saveBill();
   assert.equal(raw.bills.length, 1);
@@ -948,4 +950,59 @@ test('新账单默认只覆盖最早一条待对账记录的那一天；第一�
   edit.save();
   assert.equal(edit.data.error, '');
   assert.deepEqual([raw.records[0].note, raw.records[0].settle, raw.records[0].quantity100], ['家里', 'bill', 3500]);
+});
+test('跨零点家充只录了当天账单：仍待对账，列表与预览说明还缺哪天，车辆页计数一致；补齐后转为实际', () => {
+  const id = createCar('ev'),
+    v = loadPage('vehicle', { id });
+  v.setData({ 'form.batteryKwh': '63' });
+  v.save();
+  setMeter(loadPage('homecharge'), 'dedicated');
+  const entry = loadPage('entry', { vehicleId: id });
+  entry.toggleHome({ detail: { value: true } });
+  entry.setData({
+    'form.date': '2025-11-20',
+    'form.mileage': '1200',
+    'form.startTime': '22:00',
+    'form.socBefore': '30',
+    'form.socAfter': '80',
+  });
+  entry.save();
+  assert.equal(entry.data.error, '');
+  let settle = loadPage('settle');
+  settle.openNewBill();
+  settle.setData({ 'form.to': '2025-11-20', 'form.quantity': '36' });
+  settle.saveBill();
+  assert.equal(settle.data.preview.rows[0].after, '保存后仍待对账：还缺 11-21 的账单');
+  settle.saveBill();
+  assert.equal(raw.records[0].settle, 'pending');
+  settle = loadPage('settle');
+  assert.deepEqual([settle.data.pending[0].allocated, settle.data.pending[0].missing], [40, '还缺 11-21 的账单']);
+  const ledger = loadPage('ledger');
+  ledger.monthChange({ detail: { value: '2025-11' } });
+  assert.match(ledger.data.records[0].detail, /已对账 40%，还缺 11-21 的账单/);
+  assert.equal(loadPage('garage').data.home.pending, 1);
+  // The next new bill starts at the missing date; saving it settles the charge everywhere.
+  settle.openNewBill();
+  assert.deepEqual([settle.data.form.from, settle.data.form.to], ['2025-11-21', '2025-11-21']);
+  settle.setData({ 'form.quantity': '20' });
+  settle.saveBill();
+  settle.saveBill();
+  assert.equal(raw.records[0].settle, 'bill');
+  assert.equal(raw.records[0].quantity100, 5600);
+  assert.equal(loadPage('garage').data.home.pending, 0);
+  ledger.monthChange({ detail: { value: '2025-11' } });
+  assert.doesNotMatch(ledger.data.records[0].priceText, /预估/);
+});
+test('家充设置显示内置默认电价及当前生效的一段', () => {
+  const hc = loadPage('homecharge'),
+    month = Number(U.D.today().slice(5, 7));
+  assert.equal(hc.data.presets.length, 6);
+  assert.equal(hc.data.presets.filter(p => p.current).length, 1);
+  const current = hc.data.presets.find(p => p.current);
+  assert.ok(current.from.slice(5, 7) <= String(month).padStart(2, '0'));
+  assert.match(hc.data.presets[0].text, /^00:00 谷段 0\.3850/);
+  assert.match(hc.data.presetNote, /生效中/);
+  addPrices(hc, '2025-01-01', [{ start: '00:00', label: 'flat', labelIndex: 1, price: '0.5000' }]);
+  assert.equal(hc.data.presets.filter(p => p.current).length, 0);
+  assert.match(hc.data.presetNote, /2025-01-01 起的自定义电价/);
 });
